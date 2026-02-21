@@ -1,0 +1,10 @@
+.reportview-container { background: #0e1117; }
+.metric-card { 
+    background-color: #262730; 
+    padding: 15px; 
+    border-radius: 10px; 
+    color: white; 
+    text-align: center;
+    border: 1px solid #444;
+}
+h1, h2, h3 { color: #ffffff; }

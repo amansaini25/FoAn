@@ -1,0 +1,32 @@
+[theme]
+# Branding: Championship Blueprint Colors
+primaryColor = "#00ff85"           # HFC Green/Neon accent
+backgroundColor = "#0e1117"        # Enterprise Dark mode background
+secondaryBackgroundColor = "#262730" # Sidebar and widget background
+textColor = "#ffffff"              # High-contrast text
+font = "sans serif"
+
+[server]
+# Performance and Production Reliability
+port = 8501
+enableCORS = false                # Disable for internal enterprise servers if needed
+enableXsrfProtection = true       # Essential for security
+maxUploadSize = 200               # Increase if uploading large match event CSVs (in MB)
+headless = true                   # Set to true for server/Docker deployment
+runOnSave = false                 # Recommended 'false' for production to avoid UI flickering
+
+[client]
+# User Experience
+showSidebarNavigation = true      # Keep this true for modular framework navigation
+showErrorDetails = false          # False for enterprise (don't leak code stack to users)
+toolbarMode = "minimal"           # Removes the 'GitHub' and 'Deploy' buttons for a cleaner UI
+
+[browser]
+# Deployment Privacy
+gatherUsageStats = false          # Opt-out of telemetry for private corporate data
+serverAddress = "localhost"       # Update to your production IP or domain
+
+[runner]
+# Resource Management
+magicEnabled = false              # Disable magic to force clean, explicit PEP 8 code
+fixMatplotlib = true              # Prevents crashes when drawing network graphs
