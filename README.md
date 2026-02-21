@@ -1,6 +1,6 @@
-# ⚽ Vibe: Football Analytics Framework
+# ⚽ FoAn: Football Analytics Framework
 
-**Vibe** is a specialized football analytics dashboard designed to analyze and visualize team tactical identity, specifically focusing on passing networks and **Expected Threat (xT)**. The current implementation uses data from the **Indian Super League (ISL) 2021/22 season** (via StatsBomb) to benchmark Hyderabad FC's championship-winning tactical connectivity.
+**FoAn** is a specialized football analytics dashboard designed to analyze and visualize team tactical identity, specifically focusing on passing networks and **Expected Threat (xT)**. The current implementation uses data from the **Indian Super League (ISL) 2021/22 season** (via StatsBomb) to benchmark Hyderabad FC's championship-winning tactical connectivity.
 
 This repository represents the modular, production-ready framework for the project, refactored from an initial monolithic proof-of-concept.
 
