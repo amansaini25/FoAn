@@ -6,35 +6,44 @@ from utils.logger import get_logger
 logger = get_logger()
 
 @st.cache_data
-def load_statsbomb_data(team_name="Hyderabad", limit_matches=5, filter_team=True):
+def get_competitions():
+    """Fetches all available competitions from StatsBomb."""
+    try:
+        logger.info("Fetching StatsBomb competitions")
+        comps = sb.competitions()
+        return comps
+    except Exception as e:
+        logger.exception(f"Error loading competitions: {e}")
+        st.error(f"Error loading competitions: {e}")
+        return pd.DataFrame()
+
+@st.cache_data
+def get_matches(competition_id, season_id):
+    """Fetches matches for a specific competition and season."""
+    try:
+        logger.info(f"Fetching matches for comp: {competition_id}, season: {season_id}")
+        matches = sb.matches(competition_id=competition_id, season_id=season_id)
+        return matches
+    except Exception as e:
+        logger.exception(f"Error loading matches: {e}")
+        st.error(f"Error loading matches: {e}")
+        return pd.DataFrame()
+
+@st.cache_data
+def load_statsbomb_data(matches_df, team_name, limit_matches=None, filter_team=True):
     """
-    Fetches ISL 2021/22 data from StatsBomb.
+    Fetches events from StatsBomb for the provided matches.
     """
     try:
-        logger.info(f"Loading StatsBomb data (Team: {team_name}, limit: {limit_matches}, filter_team: {filter_team})")
-        # Get Competition
-        comps = sb.competitions()
-        isl = comps[
-            (comps['country_name'] == 'India') |
-            (comps['competition_name'].str.contains('Indian', case=False))
-        ]
-
-        if isl.empty:
-            logger.error("ISL 2021/22 data not found in StatsBomb competitions.")
-            st.error("ISL 2021/22 data not found.")
+        logger.info(f"Loading StatsBomb events for Team: {team_name}, matches: {len(matches_df)}")
+        
+        if matches_df.empty:
+            logger.warning("Empty matches dataframe provided.")
             return pd.DataFrame()
-
-        # Get Matches
-        matches = sb.matches(competition_id=isl.iloc[0]['competition_id'],
-                             season_id=isl.iloc[0]['season_id'])
-
-        # Filter Team
-        hfc_matches = matches[(matches['home_team'] == team_name) |
-                              (matches['away_team'] == team_name)]
 
         # Fetch Events (Limit matches for speed)
         all_events = []
-        matches_to_process = hfc_matches.head(limit_matches) if limit_matches else hfc_matches
+        matches_to_process = matches_df.head(limit_matches) if limit_matches else matches_df
 
         for _, match in matches_to_process.iterrows():
             match_id = match['match_id']
@@ -62,8 +71,8 @@ def load_statsbomb_data(team_name="Hyderabad", limit_matches=5, filter_team=True
         return pd.concat(all_events, ignore_index=True)
 
     except Exception as e:
-        logger.exception(f"Error loading data from StatsBomb: {e}")
-        st.error(f"Error loading data: {e}")
+        logger.exception(f"Error loading event data from StatsBomb: {e}")
+        st.error(f"Error loading event data: {e}")
         return pd.DataFrame()
 
 def preprocess_passes(df):
