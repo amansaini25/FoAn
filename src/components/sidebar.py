@@ -14,7 +14,14 @@ def render_data_selection():
         
     # 1. Competition Selection
     competition_names = sorted(comps['competition_name'].unique().tolist())
-    selected_comp_name = st.sidebar.selectbox("Competition", competition_names)
+    
+    # Map cleaned names (e.g., "1. Bundesliga" -> "Bundesliga") to original names
+    import re
+    cleaned_to_org = {re.sub(r'^\d+\.\s*', '', name): name for name in competition_names}
+    cleaned_names = sorted(list(cleaned_to_org.keys()))
+    
+    selected_cleaned_comp = st.sidebar.selectbox("Competition", cleaned_names)
+    selected_comp_name = cleaned_to_org[selected_cleaned_comp]
     
     # 2. Season Selection
     comp_data = comps[comps['competition_name'] == selected_comp_name]
