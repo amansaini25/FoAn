@@ -2,6 +2,7 @@ import streamlit as st
 import matplotlib.pyplot as plt
 from mplsoccer import Pitch, VerticalPitch
 import pandas as pd
+import numpy as np
 
 def plot_passing_network(filtered_df, min_pass_count):
     """Plots the directed passing network."""
@@ -72,3 +73,33 @@ def plot_threat_pulse(pass_df, filtered_df):
         pivot_timeline = timeline_df.groupby(['time_bin', 'player_name'])['xT'].sum().unstack().fillna(0)
         st.line_chart(pivot_timeline)
         st.caption("Which players generate the most threat during specific 15-minute match phases?")
+
+def plot_xt_grid(xt_model):
+    """Plots the xT grid as a heatmap."""
+    st.subheader("🗺️ Expected Threat (xT) Evaluation Grid")
+    
+    if xt_model is None or xt_model.xT is None:
+        st.warning("xT model not available.")
+        return
+        
+    fig, ax = plt.subplots(figsize=(10, 7))
+    pitch = Pitch(pitch_type='statsbomb', pitch_color='#1b1b1b', line_color='#c7d5cc')
+    pitch.draw(ax=ax)
+    
+    # xT array is of shape (w=8, l=12). Statsbomb pitch is 120x80.
+    im = ax.imshow(xt_model.xT, extent=[0, 120, 80, 0], cmap='viridis', alpha=0.6, aspect='auto')
+    
+    w, l = xt_model.xT.shape
+    x_bins = np.linspace(0, 120, l + 1)
+    y_bins = np.linspace(0, 80, w + 1)
+    
+    for i in range(w):
+        for j in range(l):
+            val = xt_model.xT[i, j]
+            cx = (x_bins[j] + x_bins[j+1]) / 2
+            cy = (y_bins[i] + y_bins[i+1]) / 2
+            ax.text(cx, cy, f"{val:.3f}", color='white', ha='center', va='center', fontsize=8)
+            
+    plt.colorbar(im, ax=ax, fraction=0.046, pad=0.04, label="Expected Threat (xT)")
+    st.pyplot(fig)
+

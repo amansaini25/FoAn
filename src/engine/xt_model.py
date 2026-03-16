@@ -88,6 +88,20 @@ class ExpectedThreat:
         self.move_prob_matrix = None
         self.transition_matrix = None
 
+    @classmethod
+    def load_checkpoint(cls, filepath, l=12, w=8, eps=1e-5):
+        import os
+        if not os.path.exists(filepath):
+            return None
+        model = cls(l=l, w=w, eps=eps)
+        model.xT = np.load(filepath)
+        return model
+
+    def save_checkpoint(self, filepath):
+        import os
+        os.makedirs(os.path.dirname(filepath), exist_ok=True)
+        np.save(filepath, self.xT)
+
     def fit(self, actions: pd.DataFrame):
         shots = actions[actions['type'] == 'shot']
         goals = shots[shots['result'] == 'success']

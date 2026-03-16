@@ -56,22 +56,45 @@ elif team_matches.empty:
     render_analysis_controls(None)
     st.stop()
 else:
+    import os
+    checkpoint_path = "assets/xt_checkpoint.npy"
+    xt_model = None
+    
+    if os.path.exists(checkpoint_path):
+        logger.info("Loading xT model from checkpoint...")
+        xt_model = ExpectedThreat.load_checkpoint(checkpoint_path)
+    
+    if xt_model is None:
+        with st.spinner("Fitting xT Model on all available matches (this may take a while)..."):
+            logger.info("Fetching whole dataset for xT model training...")
+            training_raw_df = load_statsbomb_data(team_matches, selected_team, limit_matches=None, filter_team=False)
+            
+            if training_raw_df.empty:
+                logger.error("Failed to load training data. The dataframe is empty.")
+                st.error("Failed to load training data. Please check connection.")
+                render_analysis_controls(None)
+                st.stop()
+                
+            logger.info("Preparing data for xT model and fitting...")
+            actions_df = prepare_xt_data(training_raw_df)
+            xt_model = ExpectedThreat(l=12, w=8, eps=1e-5)
+            xt_model.fit(actions_df)
+            
+            if not os.path.exists("assets"):
+                os.makedirs("assets", exist_ok=True)
+            xt_model.save_checkpoint(checkpoint_path)
+            logger.info("xT model successfully fitted and checkpoint saved.")
+
+    # Load data for dashboard visualization (limit for speed)
     raw_df = load_statsbomb_data(team_matches, selected_team, limit_matches=5, filter_team=False)
 
     if raw_df.empty:
-        logger.error("Failed to load data. The dataframe is empty.")
+        logger.error("Failed to load dashboard data. The dataframe is empty.")
         st.error("Failed to load data. Please check your internet connection or StatsBomb API status.")
         render_analysis_controls(None)
         st.stop()
     else:
-        logger.info(f"Successfully loaded {len(raw_df)} events.")
-
-    with st.spinner("Fitting xT Model..."):
-        logger.info("Preparing data for xT model and fitting...")
-        actions_df = prepare_xt_data(raw_df)
-        xt_model = ExpectedThreat(l=12, w=8, eps=1e-5)
-        xt_model.fit(actions_df)
-        logger.info("xT model successfully fitted.")
+        logger.info(f"Successfully loaded {len(raw_df)} events for dashboard.")
 
     team_raw_df = raw_df[raw_df['team'] == selected_team].copy()
     pass_df = preprocess_passes(team_raw_df)
