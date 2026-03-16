@@ -24,6 +24,18 @@
 4. **xT Evaluation Grid:** An interactive pitch heatmap grading the underlying spatial threat generation logic.
 5. **The Threat Pulse:** A timeline breaking down critical threat builders through 15-minute match phases.
 
+## Dashboard Previews
+
+### Main Screen
+![Main Screen](assets/dashboard%20images/main_screen.png)
+
+### Passing Network Visualization
+![Passing Network](assets/dashboard%20images/passing_network_min9pass.png)
+
+### Threat Pulse Timeline
+![Threat Pulse](assets/dashboard%20images/Pulse_threat_gen_over_time.png)
+
+
 ## Installation & Setup
 
 ### Prerequisites
