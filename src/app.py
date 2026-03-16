@@ -6,7 +6,7 @@ from utils.data_loader import load_statsbomb_data, preprocess_passes
 from engine.xt_model import apply_xt_to_passes, ExpectedThreat, prepare_xt_data
 from engine.metrics import get_network_metrics
 from components.sidebar import render_data_selection, render_analysis_controls
-from components.visuals import plot_passing_network, plot_top_xt, plot_zone_activity, plot_threat_pulse
+from components.visuals import plot_passing_network, plot_top_xt, plot_zone_activity, plot_threat_pulse, plot_xt_grid
 from utils.logger import get_logger
 
 # Suppress warnings
@@ -110,30 +110,37 @@ filtered_df, min_pass_count, selected_time = render_analysis_controls(pass_df)
 # 5. DASHBOARD LAYOUT
 # ==========================================
 
-# --- ROW 1: NETWORK HEALTH METRICS ---
-st.subheader("📊 Network Health Metrics")
+# --- MAIN TABS ---
+tab1, tab2 = st.tabs(["📊 Network Identity", "🗺️ xT Evaluation Grid"])
 
-if not filtered_df.empty:
-    curr_cent, curr_coh, curr_edges = get_network_metrics(filtered_df)
+with tab1:
+    # --- ROW 1: NETWORK HEALTH METRICS ---
+    st.subheader("📊 Network Health Metrics")
 
-    c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Pass Volume", len(filtered_df))
-    c2.metric("Centralization (Std Dev)", f"{curr_cent:.3f}", help="High = Reliance on star players. Low = Distributed.")
-    c3.metric("Triadic Cohesion", f"{curr_coh:.3f}", help="High = Strong local support triangles.")
-    c4.metric("Active Connections", curr_edges)
+    if not filtered_df.empty:
+        curr_cent, curr_coh, curr_edges = get_network_metrics(filtered_df)
 
-    # --- ROW 2: VISUALIZATIONS ---
-    st.markdown("---")
-    col_viz, col_detail = st.columns([2, 1])
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("Pass Volume", len(filtered_df))
+        c2.metric("Centralization (Std Dev)", f"{curr_cent:.3f}", help="High = Reliance on star players. Low = Distributed.")
+        c3.metric("Triadic Cohesion", f"{curr_coh:.3f}", help="High = Strong local support triangles.")
+        c4.metric("Active Connections", curr_edges)
 
-    with col_viz:
-        plot_passing_network(filtered_df, min_pass_count)
+        # --- ROW 2: VISUALIZATIONS ---
+        st.markdown("---")
+        col_viz, col_detail = st.columns([2, 1])
 
-    with col_detail:
-        plot_top_xt(filtered_df)
-        plot_zone_activity(filtered_df)
+        with col_viz:
+            plot_passing_network(filtered_df, min_pass_count)
 
-    # --- ROW 3: THREAT PULSE ---
-    plot_threat_pulse(pass_df, filtered_df)
-else:
-    st.warning("No pass data available for the selected filters.")
+        with col_detail:
+            plot_top_xt(filtered_df)
+            plot_zone_activity(filtered_df)
+
+        # --- ROW 3: THREAT PULSE ---
+        plot_threat_pulse(pass_df, filtered_df)
+    else:
+        st.warning("No pass data available for the selected filters.")
+
+with tab2:
+    plot_xt_grid(xt_model)
