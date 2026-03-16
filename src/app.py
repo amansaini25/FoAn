@@ -20,7 +20,7 @@ logger.info("Initializing Championship Blueprint Dashboard...")
 # 1. CONFIGURATION & PAGE SETUP
 # ==========================================
 st.set_page_config(
-    page_title="HFC Tactical DNA | Championship Blueprint",
+    page_title="FoAn Tactical DNA | Championship DNA",
     page_icon="⚽",
     layout="wide",
     initial_sidebar_state="expanded"
