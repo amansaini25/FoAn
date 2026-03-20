@@ -4,7 +4,7 @@ import warnings
 from utils.helpers import load_global_css
 from utils.data_loader import load_statsbomb_data, preprocess_passes
 from engine.xt_model import apply_xt_to_passes, ExpectedThreat, prepare_xt_data
-from engine.metrics import get_network_metrics
+from engine.metrics import get_network_metrics, calculate_team_dna
 from components.sidebar import render_data_selection, render_analysis_controls
 from components.visuals import plot_passing_network, plot_top_xt, plot_zone_activity, plot_threat_pulse, plot_xt_grid
 from utils.logger import get_logger
@@ -125,6 +125,64 @@ with tab1:
         c2.metric("Centralization (Std Dev)", f"{curr_cent:.3f}", help="High = Reliance on star players. Low = Distributed.")
         c3.metric("Triadic Cohesion", f"{curr_coh:.3f}", help="High = Strong local support triangles.")
         c4.metric("Active Connections", curr_edges)
+
+        # Team DNA Saving logic
+        st.markdown("---")
+        if st.button(f"💾 Save {selected_team} DNA Profile"):
+            import json
+            import os
+            
+            # 1. Prepare comprehensive df from pass_df
+            comp_df = pass_df.copy()
+            
+            # Add time_bin
+            bins = [0, 15, 30, 45, 60, 75, 90, 120]
+            labels = ['0-15', '15-30', '30-45', '45-60', '60-75', '75-90', '90+']
+            comp_df['time_bin'] = pd.cut(comp_df['minute'], bins=bins, labels=labels, right=False)
+            
+            # Add venue mapping
+            if 'match_id' in comp_df.columns and team_matches is not None:
+                home_matches = team_matches[team_matches['home_team'] == selected_team]['match_id'].tolist()
+                comp_df['venue'] = comp_df['match_id'].apply(lambda mx: 'Home' if mx in home_matches else 'Away')
+            else:
+                comp_df['venue'] = 'Unknown'
+                
+            # Build Comprehensive Profile
+            dna_comprehensive = {
+                "overall": calculate_team_dna(comp_df)
+            }
+            
+            # Outcomes
+            dna_comprehensive["by_outcome"] = {}
+            if 'outcome_result' in comp_df.columns:
+                for outcome in comp_df['outcome_result'].dropna().unique():
+                    dna_comprehensive["by_outcome"][str(outcome)] = calculate_team_dna(comp_df[comp_df['outcome_result'] == outcome])
+            
+            # Time Phases
+            dna_comprehensive["by_time_phase"] = {}
+            for phase in labels:
+                phase_df = comp_df[comp_df['time_bin'] == phase]
+                if not phase_df.empty:
+                    dna_comprehensive["by_time_phase"][str(phase)] = calculate_team_dna(phase_df)
+            
+            # Venue
+            dna_comprehensive["by_venue"] = {}
+            for venue in ['Home', 'Away']:
+                v_df = comp_df[comp_df['venue'] == venue]
+                if not v_df.empty:
+                    dna_comprehensive["by_venue"][str(venue)] = calculate_team_dna(v_df)
+            
+            # team_wise folders -> season files
+            save_dir = os.path.join("team_dna", selected_team.replace(" ", "_"))
+            os.makedirs(save_dir, exist_ok=True)
+            
+            safe_season = selected_season_name.replace("/", "_")
+            file_path = os.path.join(save_dir, f"{safe_season}_dna.json")
+            with open(file_path, "w") as f:
+                json.dump(dna_comprehensive, f, indent=4)
+                
+            st.success(f"Comprehensive Team DNA saved successfully to `{file_path}`")
+
 
         # --- ROW 2: VISUALIZATIONS ---
         st.markdown("---")
