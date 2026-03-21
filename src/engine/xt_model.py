@@ -47,6 +47,10 @@ def prepare_xt_data(raw_df):
         if action_type == 'Shot':
             result = 'success' if row.get('shot_outcome') == 'Goal' else 'fail'
             actions.append({
+                'match_id': row.get('match_id', None),
+                'minute': row.get('minute', 0),
+                'second': row.get('second', 0),
+                'player_name': row.get('player_name', 'Unknown'),
                 'type': 'shot',
                 'result': result,
                 'start_x': start_x, 'start_y': start_y,
@@ -57,6 +61,10 @@ def prepare_xt_data(raw_df):
             if isinstance(end_loc, list) and len(end_loc) >= 2:
                 result = 'fail' if pd.notna(row.get('pass_outcome')) else 'success'
                 actions.append({
+                    'match_id': row.get('match_id', None),
+                    'minute': row.get('minute', 0),
+                    'second': row.get('second', 0),
+                    'player_name': row.get('player_name', 'Unknown'),
                     'type': 'move',
                     'result': result,
                     'start_x': start_x, 'start_y': start_y,
@@ -67,6 +75,10 @@ def prepare_xt_data(raw_df):
             if isinstance(end_loc, list) and len(end_loc) >= 2:
                 # Carries are generally successful moves
                 actions.append({
+                    'match_id': row.get('match_id', None),
+                    'minute': row.get('minute', 0),
+                    'second': row.get('second', 0),
+                    'player_name': row.get('player_name', 'Unknown'),
                     'type': 'move',
                     'result': 'success',
                     'start_x': start_x, 'start_y': start_y,

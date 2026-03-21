@@ -1,6 +1,8 @@
 import streamlit as st
 
-def load_global_css(css_file_path="assets/style.css"):
+import config
+
+def load_global_css(css_file_path=config.STYLE_CSS):
     """Reads and injects custom CSS into the Streamlit app."""
     try:
         with open(css_file_path) as f:

@@ -41,11 +41,19 @@ def calculate_team_dna(df):
     total_xt = df['xT'].sum() if 'xT' in df.columns else 0.0
     xt_per_pass = total_xt / volume if volume > 0 else 0.0
     
+    total_trans_xt = df['Trans_xT'].sum() if 'Trans_xT' in df.columns else 0.0
+    trans_xt_per_pass = total_trans_xt / volume if volume > 0 else 0.0
+    
     # 4. Top Threat Creators
     top_creators = {}
     if 'xT' in df.columns and 'player_name' in df.columns:
         player_xt = df.groupby('player_name')['xT'].sum().sort_values(ascending=False)
         top_creators = player_xt.head(3).to_dict()
+
+    top_trans_creators = {}
+    if 'Trans_xT' in df.columns and 'player_name' in df.columns:
+        player_trans_xt = df.groupby('player_name')['Trans_xT'].sum().sort_values(ascending=False)
+        top_trans_creators = player_trans_xt.head(3).to_dict()
         
     dna_metrics = {
         "pass_volume": volume,
@@ -54,7 +62,10 @@ def calculate_team_dna(df):
         "cohesion": float(coh),
         "total_xt": float(total_xt),
         "xt_per_pass": float(xt_per_pass),
-        "top_threat_creators": top_creators
+        "total_trans_xt": float(total_trans_xt),
+        "trans_xt_per_pass": float(trans_xt_per_pass),
+        "top_threat_creators": top_creators,
+        "top_trans_threat_creators": top_trans_creators
     }
     
     return dna_metrics

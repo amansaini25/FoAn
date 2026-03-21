@@ -4,10 +4,13 @@ import warnings
 from utils.helpers import load_global_css
 from utils.data_loader import load_statsbomb_data, preprocess_passes
 from engine.xt_model import apply_xt_to_passes, ExpectedThreat, prepare_xt_data
+from engine.transgoalnet import train_transgoalnet, prepare_transgoalnet_dataset, apply_transgoalnet_inference
 from engine.metrics import get_network_metrics, calculate_team_dna
 from components.sidebar import render_data_selection, render_analysis_controls
 from components.visuals import plot_passing_network, plot_top_xt, plot_zone_activity, plot_threat_pulse, plot_xt_grid
 from utils.logger import get_logger
+import config
+import os
 
 # Suppress warnings
 warnings.filterwarnings('ignore')
@@ -27,7 +30,7 @@ st.set_page_config(
 )
 
 # Load global styles
-load_global_css("assets/style.css")
+load_global_css(config.STYLE_CSS)
 
 st.title("🏆 Championship Blueprint: Network Identity Dashboard")
 
@@ -40,6 +43,55 @@ if selected_comp_name and selected_season_name and selected_team:
     st.markdown(f"### Benchmarking Tactical Connectivity: {selected_team} ({selected_season_name})")
 else:
     st.markdown("### Benchmarking Tactical Connectivity")
+
+# ==========================================
+# 2.5 GLOBAL MODEL TRAINING (SIDEBAR)
+# ==========================================
+st.sidebar.markdown("---")
+st.sidebar.header("🌍 Global Model Training")
+
+import json
+import time
+import subprocess
+
+progress_file = os.path.join(config.LOGS_DIR, "training_progress.json")
+
+# Check if currently running
+is_running = False
+if os.path.exists(progress_file):
+    try:
+        with open(progress_file, "r") as f:
+            prog_data = json.load(f)
+        if prog_data.get("status") == "running":
+            is_running = True
+            st.sidebar.info("Training is currently running in the background...")
+            st.sidebar.progress(prog_data.get("progress", 0.0))
+            st.sidebar.text(prog_data.get("message", "Working..."))
+            time.sleep(2)
+            st.rerun()
+        elif prog_data.get("status") == "completed":
+            st.sidebar.success("Global models successfully trained and cached!")
+        elif prog_data.get("status") == "error":
+            st.sidebar.error(f"Training failed: {prog_data.get('message')}")
+    except Exception as e:
+        pass
+
+if not is_running:
+    if st.sidebar.button("Start Global Training Process"):
+        # Initialize progress file
+        with open(progress_file, "w") as f:
+            json.dump({"status": "running", "progress": 0.05, "message": "Initializing background training script..."}, f)
+        
+        # Spawn background process
+        try:
+            script_path = os.path.join(os.path.dirname(__file__), "scripts", "train_all_models.py")
+            subprocess.Popen(["conda", "run", "-n", "football", "python", script_path])
+            st.rerun()
+        except Exception as e:
+            import traceback
+            err_msg = traceback.format_exc()
+            logger.error(f"Failed to spawn background training:\n{err_msg}")
+            st.sidebar.error(f"Failed to start training process: {e}")
 
 # ==========================================
 # 3. DATA LOADING & PROCESSING
@@ -57,7 +109,7 @@ elif team_matches.empty:
     st.stop()
 else:
     import os
-    checkpoint_path = "assets/xt_checkpoint.npy"
+    checkpoint_path = config.XT_CHECKPOINT
     xt_model = None
     
     if os.path.exists(checkpoint_path):
@@ -77,13 +129,30 @@ else:
                 
             logger.info("Preparing data for xT model and fitting...")
             actions_df = prepare_xt_data(training_raw_df)
-            xt_model = ExpectedThreat(l=12, w=8, eps=1e-5)
+            xt_model = ExpectedThreat(l=config.XT_L, w=config.XT_W, eps=config.XT_EPS)
             xt_model.fit(actions_df)
             
-            if not os.path.exists("assets"):
-                os.makedirs("assets", exist_ok=True)
             xt_model.save_checkpoint(checkpoint_path)
             logger.info("xT model successfully fitted and checkpoint saved.")
+
+    trans_checkpoint_path = config.TGN_CHECKPOINT
+    if not os.path.exists(trans_checkpoint_path):
+        import torch
+        with st.spinner("Training TransGoalNet Model on GPU..."):
+            logger.info("Preparing TransGoalNet Dataset...")
+            actions_df = prepare_xt_data(training_raw_df) if 'training_raw_df' in locals() else prepare_xt_data(load_statsbomb_data(team_matches, selected_team, limit_matches=None, filter_team=False))
+            graphs, max_n = prepare_transgoalnet_dataset(actions_df, xt_model)
+            
+            logger.info("Starting TransGoalNet training...")
+            trans_model = train_transgoalnet(
+                graphs, max_n, 
+                epochs=config.TGN_EPOCHS, 
+                batch_size=config.TGN_BATCH_SIZE, 
+                lr=config.TGN_LR, 
+                device=config.DEVICE
+            )
+            torch.save(trans_model.state_dict(), trans_checkpoint_path)
+            logger.info("TransGoalNet successfully trained and checkpoint saved.")
 
     # Load data for dashboard visualization (limit for speed)
     raw_df = load_statsbomb_data(team_matches, selected_team, limit_matches=5, filter_team=False)
@@ -98,7 +167,17 @@ else:
 
     team_raw_df = raw_df[raw_df['team'] == selected_team].copy()
     pass_df = preprocess_passes(team_raw_df)
+    
+    # Save processed dataframe locally
+    passes_file = os.path.join(config.DATA_DIR, f"{selected_team.replace(' ', '_')}_saved_passes.csv")
+    pass_df.to_csv(passes_file, index=False)
+    logger.info(f"Saved processed pass data to {passes_file}")
+
     pass_df = apply_xt_to_passes(pass_df, xt_model=xt_model)
+    
+    with st.spinner("Calculating TransGoalNet xT (Player Contributions)..."):
+        pass_df = apply_transgoalnet_inference(pass_df, basic_xt_model=xt_model, model_checkpoint_path=trans_checkpoint_path)
+        
     logger.info("Data processing complete, rendering dashboard...")
 
 # ==========================================
@@ -173,7 +252,7 @@ with tab1:
                     dna_comprehensive["by_venue"][str(venue)] = calculate_team_dna(v_df)
             
             # team_wise folders -> season files
-            save_dir = os.path.join("team_dna", selected_team.replace(" ", "_"))
+            save_dir = os.path.join(config.DNA_DIR, selected_team.replace(" ", "_"))
             os.makedirs(save_dir, exist_ok=True)
             
             safe_season = selected_season_name.replace("/", "_")
