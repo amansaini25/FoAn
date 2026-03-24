@@ -357,7 +357,7 @@ with tab1:
         network_df['player_name'] = network_df['player_name'].map(mapping_dict_str).fillna(network_df['player_name'])
         network_df['pass_recipient_name'] = network_df['pass_recipient_name'].map(mapping_dict_str).fillna(network_df['pass_recipient_name'])
 
-        col_viz, col_mapping = st.columns([2, 1])
+        col_viz, col_mapping = st.columns([0.7, 0.3])
 
         with col_viz:
             plot_passing_network(network_df, min_pass_count)
@@ -368,7 +368,7 @@ with tab1:
 
         # --- ROW 3: CRITICAL NODES & ZONE ACTIVITY ---
         st.markdown("---")
-        col_zone, col_crit = st.columns(2)
+        col_zone, col_crit = st.columns([0.7, 0.3])
         
         with col_zone:
             plot_zone_activity(filtered_df)
