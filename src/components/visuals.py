@@ -44,8 +44,8 @@ def plot_top_xt(filtered_df):
 def plot_zone_activity(filtered_df):
     """Plots KDE heatmap of pass locations."""
     st.subheader("🎯 Zone Activity")
-    fig2, ax2 = plt.subplots(figsize=(6, 4))
-    pitch2 = VerticalPitch(pitch_type='statsbomb', line_zorder=2, line_color='#c7d5cc')
+    fig2, ax2 = plt.subplots(figsize=(10, 7))
+    pitch2 = Pitch(pitch_type='statsbomb', line_zorder=2, line_color='#c7d5cc', pitch_color='#1b1b1b')
     pitch2.draw(ax=ax2)
     if not filtered_df.empty:
         pitch2.kdeplot(filtered_df.x, filtered_df.y, ax=ax2, cmap='magma', fill=True, levels=10, alpha=0.5)

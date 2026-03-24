@@ -14,6 +14,8 @@ for d in [DATA_DIR, ASSETS_DIR, LOGS_DIR, DNA_DIR]:
 # File Paths
 STYLE_CSS = os.path.join(ASSETS_DIR, 'style.css')
 GLOBAL_DATA_FILE = os.path.join(DATA_DIR, 'all_competitions_events.pkl')
+TRAIN_ACTIONS_FILE = os.path.join(DATA_DIR, 'train_actions.pkl')
+TEST_ACTIONS_FILE = os.path.join(DATA_DIR, 'test_actions.pkl')
 
 # xT Model Parameters
 XT_L = 12

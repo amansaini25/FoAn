@@ -70,7 +70,7 @@ if os.path.exists(progress_file):
             time.sleep(2)
             st.rerun()
         elif prog_data.get("status") == "completed":
-            st.sidebar.success("Global models successfully trained and cached!")
+            st.sidebar.success("Global models successfully trained and ready to use!")
         elif prog_data.get("status") == "error":
             st.sidebar.error(f"Training failed: {prog_data.get('message')}")
     except Exception as e:
@@ -91,7 +91,56 @@ if not is_running:
             import traceback
             err_msg = traceback.format_exc()
             logger.error(f"Failed to spawn background training:\n{err_msg}")
-            st.sidebar.error(f"Failed to start training process: {e}")
+    # Global Evaluation Block
+    st.sidebar.markdown("---")
+    st.sidebar.header("🔬 Global Model Evaluation")
+    eval_progress_file = os.path.join(config.LOGS_DIR, "evaluation_progress.json")
+    
+    is_eval_running = False
+    if os.path.exists(eval_progress_file):
+        try:
+            with open(eval_progress_file, "r") as f:
+                eval_data = json.load(f)
+            if eval_data.get("status") == "running":
+                is_eval_running = True
+                st.sidebar.info("Evaluation is currently running in the background...")
+                st.sidebar.progress(eval_data.get("progress", 0.0))
+                st.sidebar.text(eval_data.get("message", "Working..."))
+                time.sleep(2)
+                st.rerun()
+            elif eval_data.get("status") == "completed":
+                st.sidebar.success("Global evaluation successfully compiled!")
+            elif eval_data.get("status") == "error":
+                st.sidebar.error(f"Evaluation failed: {eval_data.get('message')}")
+        except Exception as e:
+            pass
+
+    if not is_eval_running and not is_running:
+        if st.sidebar.button("Run Global Evaluation (30% Local Hold-out)"):
+            with open(eval_progress_file, "w") as f:
+                json.dump({"status": "running", "progress": 0.05, "message": "Initializing background evaluation script..."}, f)
+            try:
+                eval_script_path = os.path.join(os.path.dirname(__file__), "scripts", "evaluate_all_models.py")
+                subprocess.Popen(["conda", "run", "-n", "football", "python", eval_script_path])
+                st.rerun()
+            except Exception as e:
+                import traceback
+                st.sidebar.error(f"Failed to start evaluation process: {e}")
+
+    global_eval_file = os.path.join(config.LOGS_DIR, "global_tgn_eval.md")
+    if st.sidebar.button("📊 Toggle Global Evaluation Report"):
+        st.session_state['show_global_eval'] = not st.session_state.get('show_global_eval', False)
+        
+    if st.session_state.get('show_global_eval', False):
+        if os.path.exists(global_eval_file):
+            with st.sidebar.expander("Holdout 30% Test Set Results", expanded=True):
+                try:
+                    with open(global_eval_file, "r") as f:
+                        st.markdown(f.read())
+                except Exception:
+                    st.error("Could not read the global evaluation file.")
+        else:
+            st.sidebar.info("No global evaluation report found. Please run the Global Training or Evaluation Process first.")
 
 # ==========================================
 # 3. DATA LOADING & PROCESSING
@@ -186,6 +235,22 @@ else:
 filtered_df, min_pass_count, selected_time = render_analysis_controls(pass_df)
 
 # ==========================================
+# 4.5 PLAYER NUMBER MAPPING
+# ==========================================
+mapping_file = os.path.join(config.DATA_DIR, f"{selected_team.replace(' ', '_')}_player_numbers.csv")
+if os.path.exists(mapping_file):
+    player_mapping_df = pd.read_csv(mapping_file)
+else:
+    # Generate mapping from pass_df
+    unique_players = pass_df['player_name'].dropna().unique()
+    player_mapping_df = pd.DataFrame({
+        'Player Name': unique_players,
+        'Number': range(1, len(unique_players) + 1)
+    })
+    player_mapping_df.to_csv(mapping_file, index=False)
+
+
+# ==========================================
 # 5. DASHBOARD LAYOUT
 # ==========================================
 
@@ -207,74 +272,111 @@ with tab1:
 
         # Team DNA Saving logic
         st.markdown("---")
-        if st.button(f"💾 Save {selected_team} DNA Profile"):
-            import json
-            import os
-            
-            # 1. Prepare comprehensive df from pass_df
-            comp_df = pass_df.copy()
-            
-            # Add time_bin
-            bins = [0, 15, 30, 45, 60, 75, 90, 120]
-            labels = ['0-15', '15-30', '30-45', '45-60', '60-75', '75-90', '90+']
-            comp_df['time_bin'] = pd.cut(comp_df['minute'], bins=bins, labels=labels, right=False)
-            
-            # Add venue mapping
-            if 'match_id' in comp_df.columns and team_matches is not None:
-                home_matches = team_matches[team_matches['home_team'] == selected_team]['match_id'].tolist()
-                comp_df['venue'] = comp_df['match_id'].apply(lambda mx: 'Home' if mx in home_matches else 'Away')
-            else:
-                comp_df['venue'] = 'Unknown'
+        b1, b2 = st.columns(2)
+        
+        with b1:
+            if st.button(f"💾 Save {selected_team} DNA Profile"):
+                import json
+                import os
                 
-            # Build Comprehensive Profile
-            dna_comprehensive = {
-                "overall": calculate_team_dna(comp_df)
-            }
-            
-            # Outcomes
-            dna_comprehensive["by_outcome"] = {}
-            if 'outcome_result' in comp_df.columns:
-                for outcome in comp_df['outcome_result'].dropna().unique():
-                    dna_comprehensive["by_outcome"][str(outcome)] = calculate_team_dna(comp_df[comp_df['outcome_result'] == outcome])
-            
-            # Time Phases
-            dna_comprehensive["by_time_phase"] = {}
-            for phase in labels:
-                phase_df = comp_df[comp_df['time_bin'] == phase]
-                if not phase_df.empty:
-                    dna_comprehensive["by_time_phase"][str(phase)] = calculate_team_dna(phase_df)
-            
-            # Venue
-            dna_comprehensive["by_venue"] = {}
-            for venue in ['Home', 'Away']:
-                v_df = comp_df[comp_df['venue'] == venue]
-                if not v_df.empty:
-                    dna_comprehensive["by_venue"][str(venue)] = calculate_team_dna(v_df)
-            
-            # team_wise folders -> season files
-            save_dir = os.path.join(config.DNA_DIR, selected_team.replace(" ", "_"))
-            os.makedirs(save_dir, exist_ok=True)
-            
-            safe_season = selected_season_name.replace("/", "_")
-            file_path = os.path.join(save_dir, f"{safe_season}_dna.json")
-            with open(file_path, "w") as f:
-                json.dump(dna_comprehensive, f, indent=4)
+                # 1. Prepare comprehensive df from pass_df
+                comp_df = pass_df.copy()
                 
-            st.success(f"Comprehensive Team DNA saved successfully to `{file_path}`")
+                # Add time_bin
+                bins = [0, 15, 30, 45, 60, 75, 90, 120]
+                labels = ['0-15', '15-30', '30-45', '45-60', '60-75', '75-90', '90+']
+                comp_df['time_bin'] = pd.cut(comp_df['minute'], bins=bins, labels=labels, right=False)
+                
+                # Add venue mapping
+                if 'match_id' in comp_df.columns and team_matches is not None:
+                    home_matches = team_matches[team_matches['home_team'] == selected_team]['match_id'].tolist()
+                    comp_df['venue'] = comp_df['match_id'].apply(lambda mx: 'Home' if mx in home_matches else 'Away')
+                else:
+                    comp_df['venue'] = 'Unknown'
+                    
+                # Build Comprehensive Profile
+                dna_comprehensive = {
+                    "overall": calculate_team_dna(comp_df)
+                }
+                
+                # Outcomes
+                dna_comprehensive["by_outcome"] = {}
+                if 'outcome_result' in comp_df.columns:
+                    for outcome in comp_df['outcome_result'].dropna().unique():
+                        dna_comprehensive["by_outcome"][str(outcome)] = calculate_team_dna(comp_df[comp_df['outcome_result'] == outcome])
+                
+                # Time Phases
+                dna_comprehensive["by_time_phase"] = {}
+                for phase in labels:
+                    phase_df = comp_df[comp_df['time_bin'] == phase]
+                    if not phase_df.empty:
+                        dna_comprehensive["by_time_phase"][str(phase)] = calculate_team_dna(phase_df)
+                
+                # Venue
+                dna_comprehensive["by_venue"] = {}
+                for venue in ['Home', 'Away']:
+                    v_df = comp_df[comp_df['venue'] == venue]
+                    if not v_df.empty:
+                        dna_comprehensive["by_venue"][str(venue)] = calculate_team_dna(v_df)
+                
+                # team_wise folders -> season files
+                save_dir = os.path.join(config.DNA_DIR, selected_team.replace(" ", "_"))
+                os.makedirs(save_dir, exist_ok=True)
+                
+                safe_season = selected_season_name.replace("/", "_")
+                file_path = os.path.join(save_dir, f"{safe_season}_dna.json")
+                with open(file_path, "w") as f:
+                    json.dump(dna_comprehensive, f, indent=4)
+                    
+                st.success(f"Comprehensive Team DNA saved successfully to `{file_path}`")
+                
+        with b2:
+            if st.button(f"🔬 Evaluate TransGoalNet"):
+                with st.spinner("Computing TransGoalNet evaluation metrics..."):
+                    from engine.transgoalnet import evaluate_transgoalnet
+                    from engine.metrics import generate_model_evaluation_report
+                    eval_metrics = evaluate_transgoalnet(pass_df, xt_model, trans_checkpoint_path)
+                    
+                    save_dir = os.path.join(config.LOGS_DIR, f"{selected_team.replace(' ', '_')}_tgn_eval.md")
+                    os.makedirs(config.LOGS_DIR, exist_ok=True)
+                    report_md = generate_model_evaluation_report(eval_metrics, save_dir)
+                    
+                    st.success(f"Evaluation Report saved to `{save_dir}`")
+                    with st.expander("View Evaluation Report", expanded=True):
+                        st.markdown(report_md)
 
 
         # --- ROW 2: VISUALIZATIONS ---
         st.markdown("---")
-        col_viz, col_detail = st.columns([2, 1])
+        
+        # Map player names to numbers for the passing network
+        network_df = filtered_df.copy()
+        mapping_dict = dict(zip(player_mapping_df['Player Name'], player_mapping_df['Number']))
+        mapping_dict_str = {k: str(v) for k, v in mapping_dict.items()}
+        
+        network_df['player_name'] = network_df['player_name'].map(mapping_dict_str).fillna(network_df['player_name'])
+        network_df['pass_recipient_name'] = network_df['pass_recipient_name'].map(mapping_dict_str).fillna(network_df['pass_recipient_name'])
+
+        col_viz, col_mapping = st.columns([2, 1])
 
         with col_viz:
-            plot_passing_network(filtered_df, min_pass_count)
+            plot_passing_network(network_df, min_pass_count)
 
-        with col_detail:
-            plot_top_xt(filtered_df)
+        with col_mapping:
+            st.subheader("🔢 Player Mapping")
+            st.dataframe(player_mapping_df.set_index('Number'), use_container_width=True)
+
+        # --- ROW 3: CRITICAL NODES & ZONE ACTIVITY ---
+        st.markdown("---")
+        col_zone, col_crit = st.columns(2)
+        
+        with col_zone:
             plot_zone_activity(filtered_df)
+            
+        with col_crit:
+            plot_top_xt(filtered_df)
 
-        # --- ROW 3: THREAT PULSE ---
+        # --- ROW 4: THREAT PULSE ---
         plot_threat_pulse(pass_df, filtered_df)
     else:
         st.warning("No pass data available for the selected filters.")

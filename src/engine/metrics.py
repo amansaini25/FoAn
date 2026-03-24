@@ -69,3 +69,21 @@ def calculate_team_dna(df):
     }
     
     return dna_metrics
+
+def generate_model_evaluation_report(eval_metrics, save_path):
+    """
+    Generates and saves a Markdown report for TransGoalNet evaluation metrics.
+    """
+    md_content = "# TransGoalNet Model Evaluation Report\n\n"
+    md_content += "| Metric Category | Primary Tool | Value | What it tells you |\n"
+    md_content += "| --- | --- | --- | --- |\n"
+    
+    for category, det in eval_metrics.items():
+        val_str = f"{det['Value']:.5f}" if isinstance(det['Value'], float) else str(det['Value'])
+        row = f"| {category} | {det['Metric']} | **{val_str}** | {det['Meaning']} |\n"
+        md_content += row
+        
+    with open(save_path, "w") as f:
+        f.write(md_content)
+        
+    return md_content

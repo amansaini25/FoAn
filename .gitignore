@@ -2,5 +2,6 @@
 *.npy
 *.json
 *.csv
-*.pyc
+**/__pycache__/
+*.pkl
 

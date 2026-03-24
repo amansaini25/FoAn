@@ -42,6 +42,7 @@ class GraphTransformerLayer(nn.Module):
             scores = scores + rel_bias.permute(0, 3, 1, 2)
             
         attn = F.softmax(scores, dim=-1)
+        self.last_attn = attn.detach()
         out = torch.matmul(attn, v)
         out = out.transpose(1, 2).contiguous().view(B, N, self.hidden_dim)
         out = self.out_proj(out)
@@ -235,3 +236,114 @@ def apply_transgoalnet_inference(df, basic_xt_model, model_checkpoint_path):
                 df.loc[g['idx_orig'], 'Trans_xT'] = attribution.item()
                 
     return df
+
+def evaluate_transgoalnet(df, basic_xt_model, model_checkpoint_path):
+    import config
+    import numpy as np
+    
+    device = config.DEVICE
+    model = TransGoalNet(
+        node_dim=config.TGN_NODE_DIM, edge_dim=config.TGN_EDGE_DIM, 
+        hidden_dim=config.TGN_HIDDEN_DIM, num_heads=config.TGN_NUM_HEADS, 
+        num_layers=config.TGN_NUM_LAYERS
+    )
+    model.load_state_dict(torch.load(model_checkpoint_path, map_location=device))
+    model.to(device)
+    model.eval()
+    
+    df_mapped = df.copy()
+    if 'start_x' not in df_mapped.columns and 'x' in df_mapped.columns:
+        df_mapped['start_x'] = df_mapped['x']
+        df_mapped['start_y'] = df_mapped['y']
+    if 'type' not in df_mapped.columns:
+        df_mapped['type'] = 'move'
+    if 'result' not in df_mapped.columns:
+        df_mapped['result'] = 'success'
+    if 'match_id' not in df_mapped.columns:
+        df_mapped['match_id'] = 'unknown_match'
+    if 'player_name' not in df_mapped.columns and 'player' in df_mapped.columns:
+        df_mapped['player_name'] = df_mapped['player']
+        
+    graphs, _ = prepare_transgoalnet_dataset(df_mapped, basic_xt_model)
+    
+    all_targets = []
+    all_preds = []
+    attentions_list = []
+    
+    with torch.no_grad():
+        for batch_i in range(0, len(graphs), 128):
+            batch = graphs[batch_i:batch_i+128]
+            b_nodes = torch.tensor(np.array([g['nodes'] for g in batch]), dtype=torch.float32).to(device)
+            b_edges = torch.tensor(np.array([g['edges'] for g in batch]), dtype=torch.float32).to(device)
+            b_y = torch.tensor([g['target'] for g in batch], dtype=torch.float32).unsqueeze(1).to(device)
+            
+            y_hat, _ = model(b_nodes, b_edges)
+            
+            # Get attention from last layer (B, heads, N, N)
+            last_layer_attn = getattr(model.layers[-1], 'last_attn', None)
+            if last_layer_attn is not None:
+                # Average over heads
+                avg_attn = last_layer_attn.mean(dim=1) # (B, N, N)
+                for bi, g in enumerate(batch):
+                    idx = g['player_idx']
+                    attn_row = avg_attn[bi, idx, :] # (N,)
+                    attentions_list.append(attn_row.max().item())
+            
+            all_targets.extend(b_y.cpu().numpy().flatten())
+            all_preds.extend(y_hat.cpu().numpy().flatten())
+
+    if len(all_targets) == 0:
+        return {}
+
+    all_targets = np.nan_to_num(all_targets)
+    all_preds = np.nan_to_num(all_preds)
+
+    # 1. Statistical: Pseudo-Brier/MSE
+    mse = np.mean((all_targets - all_preds) ** 2)
+
+    # 2. Tactical: Attention Focus
+    avg_max_attn = np.mean(attentions_list) if attentions_list else 0.0
+
+    # 3. Stability: Mean Absolute Change
+    df_eval = df.copy()
+    if 'Trans_xT' not in df_eval.columns:
+        df_eval = apply_transgoalnet_inference(df_eval, basic_xt_model, model_checkpoint_path)
+    
+    mac = 0.0
+    if len(df_eval) > 1 and 'Trans_xT' in df_eval.columns:
+        df_eval['Trans_xT'] = pd.to_numeric(df_eval['Trans_xT'], errors='coerce')
+        valid_mac = df_eval['Trans_xT'].diff().abs().dropna()
+        if not valid_mac.empty:
+            mac = valid_mac.mean()
+        
+    # 4. Success: Pearson Correlation
+    valid_mask = ~(np.isnan(all_targets) | np.isnan(all_preds))
+    if np.sum(valid_mask) > 1 and np.std(all_preds[valid_mask]) > 0 and np.std(all_targets[valid_mask]) > 0:
+        pearson_corr = np.corrcoef(all_preds[valid_mask], all_targets[valid_mask])[0, 1]
+    else:
+        pearson_corr = 0.0
+
+    metrics = {
+        "Statistical": {
+            "Metric": "Brier Score / MSE",
+            "Value": float(mse),
+            "Meaning": "Is the probability math 'honest'?"
+        },
+        "Tactical": {
+            "Metric": "Attention Weights (Max focus)",
+            "Value": float(avg_max_attn),
+            "Meaning": "Is the model looking at the right players/lanes?"
+        },
+        "Stability": {
+            "Metric": "Mean Absolute Change",
+            "Value": float(mac),
+            "Meaning": "Does the xT value jump around too much?"
+        },
+        "Success": {
+            "Metric": "Pearson Correlation",
+            "Value": float(pearson_corr),
+            "Meaning": "Does 'high xT' actually lead to more points?"
+        }
+    }
+    return metrics
+

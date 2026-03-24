@@ -80,11 +80,34 @@ def main():
     xt_model.save_checkpoint(xt_checkpoint)
     print(f"[{datetime.now()}] Saved Basic xT Model.")
     
+    # Split actions_df by match_id (70% Train / 30% Test)
+    unique_matches = actions_df['match_id'].unique()
+    np.random.seed(42)
+    np.random.shuffle(unique_matches)
+    split_idx = int(len(unique_matches) * 0.7)
+    train_matches = unique_matches[:split_idx]
+    test_matches = unique_matches[split_idx:]
+    
+    train_actions = actions_df[actions_df['match_id'].isin(train_matches)].copy()
+    test_actions = actions_df[actions_df['match_id'].isin(test_matches)].copy()
+    
+    dataset_info["train_matches_count"] = len(train_matches)
+    dataset_info["test_matches_count"] = len(test_matches)
+    
+    print(f"[{datetime.now()}] Saving Train and Test Splits locally for evaluation...")
+    train_actions.to_pickle(config.TRAIN_ACTIONS_FILE)
+    test_actions.to_pickle(config.TEST_ACTIONS_FILE)
+    
     # 3. Train TransGoalNet
     update_progress("running", 0.7, "Preparing TransGoalNet Graphics Dataset...")
-    print(f"[{datetime.now()}] Preparing TransGoalNet Graphics Dataset...")
-    graphs, max_n = prepare_transgoalnet_dataset(actions_df, xt_model)
-    dataset_info["total_event_graphs_built"] = len(graphs)
+    print(f"[{datetime.now()}] Preparing TransGoalNet Training Dataset...")
+    graphs, max_n = prepare_transgoalnet_dataset(train_actions, xt_model)
+    dataset_info["train_event_graphs_built"] = len(graphs)
+    
+    # Free Heavy Variables from memory
+    del actions_df
+    del train_actions
+    gc.collect()
     
     device = config.DEVICE
     msg2 = f"Training TransGoalNet on {device} ({len(graphs)} graphs)..."
@@ -130,6 +153,21 @@ def main():
     trans_checkpoint = config.TGN_GLOBAL_CHECKPOINT
     torch.save(model.state_dict(), trans_checkpoint)
     print(f"[{datetime.now()}] Saved TransGoalNet Model.")
+    
+    # 3.5 Evaluate on 30% Test Data
+    if len(test_actions) > 0:
+        print(f"[{datetime.now()}] Evaluating TransGoalNet on 30% Test Set ({len(test_matches)} matches)...")
+        update_progress("running", 0.9, "Evaluating TransGoalNet on Test Data...")
+        from engine.transgoalnet import evaluate_transgoalnet
+        from engine.metrics import generate_model_evaluation_report
+        
+        eval_metrics_dict = evaluate_transgoalnet(test_actions, xt_model, trans_checkpoint)
+        eval_metrics["test_set_performance"] = eval_metrics_dict
+        
+        save_dir_eval = os.path.join(config.LOGS_DIR, "global_tgn_eval.md")
+        os.makedirs(config.LOGS_DIR, exist_ok=True)
+        generate_model_evaluation_report(eval_metrics_dict, save_dir_eval)
+        print(f"[{datetime.now()}] Saved global evaluation report to {save_dir_eval}")
     
     # 4. Save Info & Architecture
     eval_metrics = {
