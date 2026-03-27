@@ -7,7 +7,7 @@ from engine.xt_model import apply_xt_to_passes, ExpectedThreat, prepare_xt_data
 from engine.transgoalnet import train_transgoalnet, prepare_transgoalnet_dataset, apply_transgoalnet_inference
 from engine.metrics import get_network_metrics, calculate_team_dna
 from components.sidebar import render_data_selection, render_analysis_controls
-from components.visuals import plot_passing_network, plot_top_xt, plot_zone_activity, plot_threat_pulse, plot_xt_grid
+from components.visuals import plot_passing_network, plot_top_xt, plot_zone_activity, plot_threat_pulse, plot_xt_grid, plot_dna_radar
 from utils.logger import get_logger
 import config
 import os
@@ -116,7 +116,7 @@ if not is_running:
             pass
 
     if not is_eval_running and not is_running:
-        if st.sidebar.button("Run Global Evaluation (30% Local Hold-out)"):
+        if st.sidebar.button("Run Global Evaluation (20% Local Hold-out)"):
             with open(eval_progress_file, "w") as f:
                 json.dump({"status": "running", "progress": 0.05, "message": "Initializing background evaluation script..."}, f)
             try:
@@ -184,7 +184,7 @@ else:
             xt_model.save_checkpoint(checkpoint_path)
             logger.info("xT model successfully fitted and checkpoint saved.")
 
-    trans_checkpoint_path = config.TGN_CHECKPOINT
+    trans_checkpoint_path = config.TGN_GLOBAL_CHECKPOINT if os.path.exists(config.TGN_GLOBAL_CHECKPOINT) else config.TGN_CHECKPOINT
     if not os.path.exists(trans_checkpoint_path):
         import torch
         with st.spinner("Training TransGoalNet Model on GPU..."):
@@ -258,10 +258,21 @@ else:
 tab1, tab2 = st.tabs(["📊 Network Identity", "🗺️ xT Evaluation Grid"])
 
 with tab1:
-    # --- ROW 1: NETWORK HEALTH METRICS ---
-    st.subheader("📊 Network Health Metrics")
-
     if not filtered_df.empty:
+        # --- TEAM DNA RADAR ---
+        st.subheader("🧬 Team DNA Radar (Average Match Profile)")
+        
+        # Calculate DNA using the full pass_df (representing whole matches)
+        overall_dna_metrics = calculate_team_dna(pass_df)
+        
+        col_r1, col_r2, col_r3 = st.columns([1, 2, 1])
+        with col_r2:
+            plot_dna_radar(overall_dna_metrics)
+
+        # --- ROW 1: NETWORK HEALTH METRICS ---
+        st.markdown("---")
+        st.subheader("📊 Network Health Metrics (Current Filter)")
+
         curr_cent, curr_coh, curr_edges = get_network_metrics(filtered_df)
 
         c1, c2, c3, c4 = st.columns(4)
@@ -320,11 +331,14 @@ with tab1:
                         dna_comprehensive["by_venue"][str(venue)] = calculate_team_dna(v_df)
                 
                 # team_wise folders -> season files
-                save_dir = os.path.join(config.DNA_DIR, selected_team.replace(" ", "_"))
+                safe_comp = selected_comp_name.replace("/", "_").replace(" ", "_")
+                safe_season = selected_season_name.replace("/", "_").replace(" ", "_")
+                safe_team = selected_team.replace("/", "_").replace(" ", "_")
+                
+                save_dir = os.path.join(config.DNA_DIR, safe_comp, safe_season, safe_team)
                 os.makedirs(save_dir, exist_ok=True)
                 
-                safe_season = selected_season_name.replace("/", "_")
-                file_path = os.path.join(save_dir, f"{safe_season}_dna.json")
+                file_path = os.path.join(save_dir, "dna_profile.json")
                 with open(file_path, "w") as f:
                     json.dump(dna_comprehensive, f, indent=4)
                     

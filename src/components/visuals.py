@@ -103,3 +103,67 @@ def plot_xt_grid(xt_model):
     plt.colorbar(im, ax=ax, fraction=0.046, pad=0.04, label="Expected Threat (xT)")
     st.pyplot(fig)
 
+def plot_dna_radar(dna_metrics):
+    """Plots a normalized Radar Chart for Team DNA."""
+    if not dna_metrics:
+        return
+        
+    categories = ['Pass Vol', 'Centralization', 'Active Conns', 'Triadic Cohesion', 'xT', 'Delta xT']
+    
+    # Extract values
+    raw_values = [
+        dna_metrics.get('avg_pass_volume', 0.0),
+        dna_metrics.get('avg_centralization', 0.0),
+        dna_metrics.get('avg_active_connections', 0.0),
+        dna_metrics.get('avg_cohesion', 0.0),
+        dna_metrics.get('avg_xt', 0.0),
+        dna_metrics.get('delta_xt', 0.0)
+    ]
+    
+    # Cap values for normalization (empirical maximums to scale the polygon)
+    max_vals = [1000, 0.2, 350, 0.2, 2.0, 1.0]
+    
+    # Normalize values between 0 and 1
+    values = [max(0.01, min(v / m, 1.0)) for v, m in zip(raw_values, max_vals)]
+    
+    # Close the radar loop
+    values += values[:1]
+    angles = np.linspace(0, 2 * np.pi, len(categories), endpoint=False).tolist()
+    angles += angles[:1]
+    
+    fig, ax = plt.subplots(figsize=(5, 5), subplot_kw=dict(polar=True))
+    fig.patch.set_facecolor('none')
+    ax.set_facecolor('none')
+    
+    # Draw plot
+    ax.plot(angles, values, color='#00ff85', linewidth=2)
+    ax.fill(angles, values, color='#00ff85', alpha=0.25)
+    
+    # Set category labels
+    ax.set_xticks(angles[:-1])
+    ax.set_xticklabels(categories, size=10, weight='bold', color='white')
+    
+    # Formatting
+    ax.set_ylim(0, 1)
+    ax.set_yticklabels([]) # Hide radial ticks
+    ax.spines['polar'].set_color('#555555')
+    ax.grid(color='#555555', linestyle='--', linewidth=0.5)
+    
+    # Add actual values as text
+    for angle, value, raw_value in zip(angles[:-1], values[:-1], raw_values):
+        ha = 'center'
+        if 0.1 < angle < np.pi - 0.1:       # Right half
+            ha = 'left'
+        elif np.pi + 0.1 < angle < 2*np.pi - 0.1: # Left half
+            ha = 'right'
+        
+        # Display formatted raw value
+        if raw_value >= 10:
+            val_text = f" {int(raw_value)} "
+        else:
+            val_text = f" {raw_value:.2f} "
+            
+        ax.text(angle, value + 0.15, val_text, size=10, color='#ff4b4b', ha=ha, va='center', weight='bold')
+        
+    st.pyplot(fig)
+

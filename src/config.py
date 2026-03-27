@@ -25,14 +25,14 @@ XT_CHECKPOINT = os.path.join(ASSETS_DIR, 'xt_checkpoint.npy')
 XT_GLOBAL_CHECKPOINT = os.path.join(ASSETS_DIR, 'xt_checkpoint_global.npy')
 
 # TransGoalNet Parameters
-TGN_NODE_DIM = 4
+TGN_NODE_DIM = 10
 TGN_EDGE_DIM = 5
 TGN_HIDDEN_DIM = 64
 TGN_NUM_HEADS = 4
 TGN_NUM_LAYERS = 2
-TGN_EPOCHS = 15
+TGN_EPOCHS = 100
 TGN_BATCH_SIZE = 64
-TGN_LR = 1e-3
+TGN_LR = 1e-4
 
 TGN_CHECKPOINT = os.path.join(ASSETS_DIR, 'transgoalnet.pth')
 TGN_GLOBAL_CHECKPOINT = os.path.join(ASSETS_DIR, 'transgoalnet_global.pth')

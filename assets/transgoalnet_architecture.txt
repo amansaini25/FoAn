@@ -2,7 +2,7 @@ TransGoalNet PyTorch Architecture
 =================================
 
 TransGoalNet(
-  (node_proj): Linear(in_features=4, out_features=64, bias=True)
+  (node_proj): Linear(in_features=10, out_features=64, bias=True)
   (edge_proj): Linear(in_features=5, out_features=4, bias=True)
   (layers): ModuleList(
     (0-1): 2 x GraphTransformerLayer(

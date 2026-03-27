@@ -26,44 +26,70 @@ def get_network_metrics(data):
 
 def calculate_team_dna(df):
     """
-    Calculates the Team DNA metrics from the full passes dataframe.
+    Calculates the Team DNA metrics from the full passes dataframe, averaged per match.
     """
     if df.empty:
         return {}
+        
+    match_ids = df['match_id'].unique() if 'match_id' in df.columns else ['single_match']
+    num_matches = len(match_ids) if len(match_ids) > 0 else 1
     
-    # 1. Volume
-    volume = len(df)
+    # Per-match arrays
+    volumes = []
+    centralizations = []
+    cohesions = []
+    conns = []
+    xts = []
+    trans_xts = []
     
-    # 2. Centralization & Cohesion & Active Connections
-    cent, coh, active_conns = get_network_metrics(df)
+    for match_id in match_ids:
+        # If 'match_id' isn't in df, just use the whole df
+        m_df = df[df['match_id'] == match_id] if 'match_id' in df.columns else df
+        
+        volumes.append(len(m_df))
+        c, co, a = get_network_metrics(m_df)
+        centralizations.append(c)
+        cohesions.append(co)
+        conns.append(a)
+        
+        m_xt = m_df['xT'].sum() if 'xT' in m_df.columns else 0.0
+        xts.append(m_xt)
+        
+        m_trans_xt = m_df['Trans_xT'].sum() if 'Trans_xT' in m_df.columns else 0.0
+        trans_xts.append(m_trans_xt)
+        
+    avg_volume = np.mean(volumes) if volumes else 0.0
+    avg_cent = np.mean(centralizations) if centralizations else 0.0
+    avg_coh = np.mean(cohesions) if cohesions else 0.0
+    avg_conns = np.mean(conns) if conns else 0.0
+    avg_xt = np.mean(xts) if xts else 0.0
+    avg_trans_xt = np.mean(trans_xts) if trans_xts else 0.0
     
-    # 3. xT Metrics
-    total_xt = df['xT'].sum() if 'xT' in df.columns else 0.0
-    xt_per_pass = total_xt / volume if volume > 0 else 0.0
+    xt_per_pass = avg_xt / avg_volume if avg_volume > 0 else 0.0
+    trans_xt_per_pass = avg_trans_xt / avg_volume if avg_volume > 0 else 0.0
+    delta_xt = avg_trans_xt
     
-    total_trans_xt = df['Trans_xT'].sum() if 'Trans_xT' in df.columns else 0.0
-    trans_xt_per_pass = total_trans_xt / volume if volume > 0 else 0.0
-    
-    # 4. Top Threat Creators
+    # 4. Top Threat Creators (overall across all matches for simplicity, divided by matches)
     top_creators = {}
     if 'xT' in df.columns and 'player_name' in df.columns:
-        player_xt = df.groupby('player_name')['xT'].sum().sort_values(ascending=False)
+        player_xt = (df.groupby('player_name')['xT'].sum() / num_matches).sort_values(ascending=False)
         top_creators = player_xt.head(3).to_dict()
 
     top_trans_creators = {}
     if 'Trans_xT' in df.columns and 'player_name' in df.columns:
-        player_trans_xt = df.groupby('player_name')['Trans_xT'].sum().sort_values(ascending=False)
+        player_trans_xt = (df.groupby('player_name')['Trans_xT'].sum() / num_matches).sort_values(ascending=False)
         top_trans_creators = player_trans_xt.head(3).to_dict()
         
     dna_metrics = {
-        "pass_volume": volume,
-        "active_connections": active_conns,
-        "centralization": float(cent),
-        "cohesion": float(coh),
-        "total_xt": float(total_xt),
+        "avg_pass_volume": float(avg_volume),
+        "avg_active_connections": float(avg_conns),
+        "avg_centralization": float(avg_cent),
+        "avg_cohesion": float(avg_coh),
+        "avg_xt": float(avg_xt),
         "xt_per_pass": float(xt_per_pass),
-        "total_trans_xt": float(total_trans_xt),
+        "avg_trans_xt": float(avg_trans_xt),
         "trans_xt_per_pass": float(trans_xt_per_pass),
+        "delta_xt": float(delta_xt),
         "top_threat_creators": top_creators,
         "top_trans_threat_creators": top_trans_creators
     }
