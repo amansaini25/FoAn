@@ -1,5 +1,7 @@
 # FoAn: Football Analytics Framework
 
+![Team DNA Radar](assets/dashboard%20images/DNA_radar.png)
+
 **FoAn** is a modular, scalable football analytics dashboard designed to analyze and visualize team tactical identity. It specifically focuses on passing networks, triadic cohesion, and **Expected Threat (xT)**. This project leverages open data from StatsBomb to benchmark tactical connectivity, with an emphasis on championship-winning structures (like Hyderabad FC's 2021/22 ISL season).
 
 ## Core Technologies
@@ -21,8 +23,16 @@
 1. **Network Health Metrics:** Evaluates team reliance on specific players (Centralization) and local support strengths (Triadic Cohesion).
 2. **Directed Passing Network:** Visualizes strong tactical links and critical nodes powered by Expected Threat generation.
 3. **Expected Threat (xT) AI Model:** Employs a Markov-based dynamic programming approach to calculate the incremental probability of scoring from passing sequences. It handles full dataset training and caches the learned matrices natively for zero-latency inference.
-4. **xT Evaluation Grid:** An interactive pitch heatmap grading the underlying spatial threat generation logic.
-5. **The Threat Pulse:** A timeline breaking down critical threat builders through 15-minute match phases.
+24: 4. **xT Evaluation Grid:** An interactive pitch heatmap grading the underlying spatial threat generation logic.
+25: 5. **The Threat Pulse:** A timeline breaking down critical threat builders through 15-minute match phases.
+26: 
+27: ## TransGoalNet Architecture
+28: We have recently upgraded the analytical capabilities from a Markov-based spatial `xT` grid to a robust Graph Transformer model called **TransGoalNet**.
+29: 
+30: - **Node Configuration**: Constructs graphs using a 10-feature player statistical profile (Goals, Dribbles, Pass %, Clearances, etc.).
+31: - **Temporal Context**: Evaluates a chronological sliding window ($k=20$ events) rather than analyzing isolated actions.
+32: - **Delta Expected Threat ($\Delta xT$)**: Directly predicts the net swing in offensive possession threat between consecutive nodes.
+33: - **Optimization Pipeline**: Implements Xavier Weight Initialization, PyTorch Adam with Weight Decay (`1e-4`), StepLR scheduling (halving every 10 epochs), and precise 5-epoch early stopping.
 
 ## Dashboard Previews
 
@@ -46,7 +56,7 @@
 1. Clone the repository and navigate to the project directory.
 2. Install the necessary dependencies:
 ```bash
-pip install streamlit pandas numpy networkx matplotlib statsbombpy mplsoccer
+pip install streamlit pandas numpy networkx matplotlib statsbombpy mplsoccer torch
 ```
 
 ### Running the Dashboard
