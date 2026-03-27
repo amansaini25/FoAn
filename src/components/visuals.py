@@ -167,3 +167,59 @@ def plot_dna_radar(dna_metrics):
         
     st.pyplot(fig)
 
+def plot_tactical_heatmap(filtered_df, top_lane):
+    """Plots Tactical Heatmap showing the Key Passing Lane based on TransGoalNet Attention."""
+    import streamlit as st
+    import matplotlib.pyplot as plt
+    from mplsoccer import Pitch
+    
+    st.subheader("🔥 Tactical Heatmap & Key Passing Lane")
+    
+    if filtered_df.empty:
+        st.warning("No data available.")
+        return
+
+    fig, ax = plt.subplots(figsize=(10, 7))
+    pitch = Pitch(pitch_type='statsbomb', line_zorder=2, line_color='#c7d5cc', pitch_color='#1b1b1b')
+    pitch.draw(ax=ax)
+    
+    # Base Heatmap
+    pitch.kdeplot(filtered_df.x, filtered_df.y, ax=ax, cmap='magma', fill=True, levels=10, alpha=0.3)
+    
+    # Key Passing Lane
+    if top_lane and top_lane.get('passer') and top_lane.get('recipient'):
+        p1 = top_lane['passer']
+        p2 = top_lane['recipient']
+        val = top_lane['attention']
+        
+        # Get average locs
+        locs = filtered_df.groupby('player_name')[['x', 'y']].mean()
+        
+        if p1 in locs.index and p2 in locs.index:
+            x1, y1 = locs.loc[p1].x, locs.loc[p1].y
+            x2, y2 = locs.loc[p2].x, locs.loc[p2].y
+            
+            # Draw glowing arrow
+            pitch.arrows(x1, y1, x2, y2, ax=ax, width=5, headwidth=8, color='#00ff85', alpha=0.9, zorder=3)
+            
+            # Nodes
+            pitch.scatter(x1, y1, ax=ax, s=300, color='#ff4b4b', edgecolors='white', zorder=4)
+            pitch.scatter(x2, y2, ax=ax, s=300, color='#ff4b4b', edgecolors='white', zorder=4)
+            
+            # Labels
+            ax.text(x1, y1+3, p1.split()[-1], color='white', fontsize=11, ha='center', weight='bold', zorder=5)
+            ax.text(x2, y2+3, p2.split()[-1], color='white', fontsize=11, ha='center', weight='bold', zorder=5)
+            
+            # Annotation
+            mid_x = (x1 + x2) / 2
+            mid_y = (y1 + y2) / 2
+            ax.text(mid_x, mid_y - 2, f"Attention: {val:.3f}", color='#00ff85', fontsize=12, ha='center', weight='bold', zorder=5)
+            
+            st.success(f"**Key Focus:** The model optimally routed attacks through the '{p1} ➡️ {p2}' channel (Attention: **{val:.3f}**).")
+        else:
+            st.info(f"Target node '{p1}' or '{p2}' not found in the current timeframe/filter.")
+    else:
+        st.info("No Key Passing Lane detected in the current data.")
+
+    st.pyplot(fig)
+

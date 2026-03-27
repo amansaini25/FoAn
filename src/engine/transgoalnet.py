@@ -256,7 +256,8 @@ def prepare_transgoalnet_dataset(actions_df, basic_xt_model, k_window=20):
                 'target': delta_xt,
                 'player_idx': idx,
                 'match_id': row['match_id'],
-                'idx_orig': row.get('idx', i)
+                'idx_orig': row.get('idx', i),
+                'idx_to_player': {idx_val: p_name for p_name, idx_val in player_to_idx.items()}
             })
             
     return graphs, MAX_N
@@ -357,7 +358,10 @@ def apply_transgoalnet_inference(df, basic_xt_model, model_checkpoint_path):
     if 'player_name' not in df_mapped.columns and 'player' in df_mapped.columns:
         df_mapped['player_name'] = df_mapped['player']
         
-    graphs, _ = prepare_transgoalnet_dataset(df_mapped, basic_xt_model)
+    graphs, max_n_val = prepare_transgoalnet_dataset(df_mapped, basic_xt_model)
+    
+    max_attn_val = -1.0
+    top_lane = {'passer': None, 'recipient': None, 'attention': 0.0}
     
     with torch.no_grad():
         for batch_i in range(0, len(graphs), 128):
@@ -368,6 +372,28 @@ def apply_transgoalnet_inference(df, basic_xt_model, model_checkpoint_path):
             
             y_hat, node_embs = model(b_nodes, b_edges)
             
+            last_layer_attn = getattr(model.layers[-1], 'last_attn', None)
+            if last_layer_attn is not None:
+                max_attn_batch = last_layer_attn.max(dim=1)[0].cpu().numpy() # [B, N, N]
+                for bi in range(len(batch)):
+                    # find absolute max in this subgraph
+                    # shape is (N, N)
+                    N_sub = max_attn_batch[bi].shape[0]
+                    # avoid self-attention diagonal
+                    np.fill_diagonal(max_attn_batch[bi], 0)
+                    if max_attn_batch[bi].max() > max_attn_val:
+                        max_local = max_attn_batch[bi].max()
+                        idx = np.unravel_index(np.argmax(max_attn_batch[bi]), max_attn_batch[bi].shape)
+                        max_attn_val = max_local
+                        
+                        p1_idx, p2_idx = idx
+                        local_idx_to_player = batch[bi].get('idx_to_player', {})
+                        top_lane = {
+                            'passer': local_idx_to_player.get(p1_idx, "Unknown"),
+                            'recipient': local_idx_to_player.get(p2_idx, "Unknown"),
+                            'attention': float(max_attn_val)
+                        }
+            
             # extract predictions
             for bi, g in enumerate(batch):
                 pred_xt = y_hat[bi].item()
@@ -375,7 +401,7 @@ def apply_transgoalnet_inference(df, basic_xt_model, model_checkpoint_path):
                 # assign the predicted change in xT directly to the dataframe
                 df.loc[g['idx_orig'], 'Trans_xT'] = pred_xt
                 
-    return df
+    return df, top_lane
 
 def evaluate_transgoalnet(df, basic_xt_model, model_checkpoint_path):
     import config

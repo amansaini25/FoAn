@@ -7,7 +7,7 @@ from engine.xt_model import apply_xt_to_passes, ExpectedThreat, prepare_xt_data
 from engine.transgoalnet import train_transgoalnet, prepare_transgoalnet_dataset, apply_transgoalnet_inference
 from engine.metrics import get_network_metrics, calculate_team_dna
 from components.sidebar import render_data_selection, render_analysis_controls
-from components.visuals import plot_passing_network, plot_top_xt, plot_zone_activity, plot_threat_pulse, plot_xt_grid, plot_dna_radar
+from components.visuals import plot_passing_network, plot_top_xt, plot_zone_activity, plot_threat_pulse, plot_xt_grid, plot_dna_radar, plot_tactical_heatmap
 from utils.logger import get_logger
 import config
 import os
@@ -225,7 +225,7 @@ else:
     pass_df = apply_xt_to_passes(pass_df, xt_model=xt_model)
     
     with st.spinner("Calculating TransGoalNet xT (Player Contributions)..."):
-        pass_df = apply_transgoalnet_inference(pass_df, basic_xt_model=xt_model, model_checkpoint_path=trans_checkpoint_path)
+        pass_df, top_lane = apply_transgoalnet_inference(pass_df, basic_xt_model=xt_model, model_checkpoint_path=trans_checkpoint_path)
         
     logger.info("Data processing complete, rendering dashboard...")
 
@@ -255,7 +255,7 @@ else:
 # ==========================================
 
 # --- MAIN TABS ---
-tab1, tab2 = st.tabs(["📊 Network Identity", "🗺️ xT Evaluation Grid"])
+tab1, tab2, tab3 = st.tabs(["📊 Network Identity", "🗺️ xT Evaluation Grid", "🔥 Tactical Heatmap"])
 
 with tab1:
     if not filtered_df.empty:
@@ -397,3 +397,6 @@ with tab1:
 
 with tab2:
     plot_xt_grid(xt_model)
+
+with tab3:
+    plot_tactical_heatmap(filtered_df, top_lane)
