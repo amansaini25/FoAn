@@ -337,7 +337,8 @@ def apply_transgoalnet_inference(df, basic_xt_model, model_checkpoint_path):
         hidden_dim=config.TGN_HIDDEN_DIM, num_heads=config.TGN_NUM_HEADS, 
         num_layers=config.TGN_NUM_LAYERS
     )
-    model.load_state_dict(torch.load(model_checkpoint_path, map_location=device))
+    # Load to CPU first to prevent CUDA out-of-memory or threading crashes in Streamlit
+    model.load_state_dict(torch.load(model_checkpoint_path, map_location='cpu'))
     model.to(device)
     model.eval()
     
@@ -413,7 +414,8 @@ def evaluate_transgoalnet(df, basic_xt_model, model_checkpoint_path):
         hidden_dim=config.TGN_HIDDEN_DIM, num_heads=config.TGN_NUM_HEADS, 
         num_layers=config.TGN_NUM_LAYERS
     )
-    model.load_state_dict(torch.load(model_checkpoint_path, map_location=device))
+    # Load to CPU first to prevent CUDA out-of-memory or threading crashes in Streamlit
+    model.load_state_dict(torch.load(model_checkpoint_path, map_location='cpu'))
     model.to(device)
     model.eval()
     

@@ -223,3 +223,55 @@ def plot_tactical_heatmap(filtered_df, top_lane):
 
     st.pyplot(fig)
 
+def plot_championship_leaderboard(leaderboard_df):
+    """Renders the Championship DNA Leaderboard."""
+    st.subheader("🏆 Championship DNA Leaderboard")
+    
+    if leaderboard_df.empty:
+        st.warning("No data available to build the leaderboard.")
+        return
+        
+    st.markdown("This leaderboard ranks teams based on their **Championship DNA Index (CDI)**, which merges their functional on-field point-gathering (Win/Loss Spread) with tactical dominance (Team DNA Metrics).")
+    
+    # Format the dataframe for display
+    display_df = leaderboard_df.copy()
+    
+    # Sort
+    display_df = display_df.sort_values(by='CDI', ascending=False).reset_index(drop=True)
+    display_df.index += 1 # 1-indexed ranks
+    
+    # Keep specific columns
+    cols_to_show = ['Team', 'Matches', 'Win_Ratio', 'Loss_Ratio', 'CDI', 'TES']
+    if 'Seasons_Saved' in display_df.columns:
+        cols_to_show.insert(2, 'Seasons_Saved')
+        
+    if 'Cohesion' in display_df.columns:
+        cols_to_show.extend(['Cohesion', 'Trans_xT', 'Basic_xT', 'Centralization'])
+        
+    display_df = display_df[cols_to_show]
+    
+    # Formatting
+    format_dict = {
+        'Win_Ratio': '{:.2%}',
+        'Loss_Ratio': '{:.2%}',
+        'CDI': '{:.1f}',
+        'TES': '{:.3f}',
+        'Cohesion': '{:.3f}',
+        'Trans_xT': '{:.3f}',
+        'Basic_xT': '{:.3f}',
+        'Centralization': '{:.3f}'
+    }
+    
+    # Apply styling
+    styled_df = display_df.style.format(format_dict).background_gradient(
+        subset=['CDI'], cmap='YlGn'
+    ).background_gradient(
+        subset=['Win_Ratio'], cmap='Greens'
+    ).background_gradient(
+        subset=['Loss_Ratio'], cmap='Reds'
+    )
+    
+    if 'TES' in display_df.columns:
+        styled_df = styled_df.background_gradient(subset=['TES'], cmap='Blues')
+        
+    st.dataframe(styled_df, use_container_width=True, height=600)

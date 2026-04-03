@@ -5,9 +5,9 @@ from utils.helpers import load_global_css
 from utils.data_loader import load_statsbomb_data, preprocess_passes
 from engine.xt_model import apply_xt_to_passes, ExpectedThreat, prepare_xt_data
 from engine.transgoalnet import train_transgoalnet, prepare_transgoalnet_dataset, apply_transgoalnet_inference
-from engine.metrics import get_network_metrics, calculate_team_dna
+from engine.metrics import get_network_metrics, calculate_team_dna, calculate_championship_leaderboard, generate_and_save_comprehensive_dna
 from components.sidebar import render_data_selection, render_analysis_controls
-from components.visuals import plot_passing_network, plot_top_xt, plot_zone_activity, plot_threat_pulse, plot_xt_grid, plot_dna_radar, plot_tactical_heatmap
+from components.visuals import plot_passing_network, plot_top_xt, plot_zone_activity, plot_threat_pulse, plot_xt_grid, plot_dna_radar, plot_tactical_heatmap, plot_championship_leaderboard
 from utils.logger import get_logger
 import config
 import os
@@ -37,7 +37,7 @@ st.title("🏆 Championship Blueprint: Network Identity Dashboard")
 # ==========================================
 # 2. DATA SELECTION (SIDEBAR)
 # ==========================================
-selected_comp_name, selected_season_name, selected_team, team_matches = render_data_selection()
+selected_comp_name, selected_season_name, selected_team, team_matches, all_matches, comp_id = render_data_selection()
 
 if selected_comp_name and selected_season_name and selected_team:
     st.markdown(f"### Benchmarking Tactical Connectivity: {selected_team} ({selected_season_name})")
@@ -203,8 +203,8 @@ else:
             torch.save(trans_model.state_dict(), trans_checkpoint_path)
             logger.info("TransGoalNet successfully trained and checkpoint saved.")
 
-    # Load data for dashboard visualization (limit for speed)
-    raw_df = load_statsbomb_data(team_matches, selected_team, limit_matches=5, filter_team=False)
+    # Load data for dashboard visualization
+    raw_df = load_statsbomb_data(team_matches, selected_team, limit_matches=None, filter_team=False)
 
     if raw_df.empty:
         logger.error("Failed to load dashboard data. The dataframe is empty.")
@@ -215,18 +215,24 @@ else:
         logger.info(f"Successfully loaded {len(raw_df)} events for dashboard.")
 
     team_raw_df = raw_df[raw_df['team'] == selected_team].copy()
-    pass_df = preprocess_passes(team_raw_df)
-    
-    # Save processed dataframe locally
+
     passes_file = os.path.join(config.DATA_DIR, f"{selected_team.replace(' ', '_')}_saved_passes.csv")
-    pass_df.to_csv(passes_file, index=False)
-    logger.info(f"Saved processed pass data to {passes_file}")
+    if os.path.exists(passes_file):
+        pass_df = pd.read_csv(passes_file)
+    else:       
+        pass_df = preprocess_passes(team_raw_df)
+        # Save processed dataframe locally
+        pass_df.to_csv(passes_file, index=False)
+        logger.info(f"Saved processed pass data to {passes_file}")
 
     pass_df = apply_xt_to_passes(pass_df, xt_model=xt_model)
     
     with st.spinner("Calculating TransGoalNet xT (Player Contributions)..."):
         pass_df, top_lane = apply_transgoalnet_inference(pass_df, basic_xt_model=xt_model, model_checkpoint_path=trans_checkpoint_path)
         
+    with st.spinner("Compiling and saving Team DNA Profile silently..."):
+        generate_and_save_comprehensive_dna(pass_df, team_matches, selected_team, selected_comp_name, selected_season_name, config.DNA_DIR)
+            
     logger.info("Data processing complete, rendering dashboard...")
 
 # ==========================================
@@ -255,7 +261,7 @@ else:
 # ==========================================
 
 # --- MAIN TABS ---
-tab1, tab2, tab3 = st.tabs(["📊 Network Identity", "🗺️ xT Evaluation Grid", "🔥 Tactical Heatmap"])
+tab1, tab2, tab3, tab4 = st.tabs(["📊 Network Identity", "🗺️ xT Evaluation Grid", "🔥 Tactical Heatmap", "🏆 Championship Leaderboard"])
 
 with tab1:
     if not filtered_df.empty:
@@ -281,83 +287,22 @@ with tab1:
         c3.metric("Triadic Cohesion", f"{curr_coh:.3f}", help="High = Strong local support triangles.")
         c4.metric("Active Connections", curr_edges)
 
-        # Team DNA Saving logic
+        # Evaluate TransGoalNet Model
         st.markdown("---")
-        b1, b2 = st.columns(2)
         
-        with b1:
-            if st.button(f"💾 Save {selected_team} DNA Profile"):
-                import json
-                import os
+        if st.button(f"🔬 Evaluate TransGoalNet"):
+            with st.spinner("Computing TransGoalNet evaluation metrics..."):
+                from engine.transgoalnet import evaluate_transgoalnet
+                from engine.metrics import generate_model_evaluation_report
+                eval_metrics = evaluate_transgoalnet(pass_df, xt_model, trans_checkpoint_path)
                 
-                # 1. Prepare comprehensive df from pass_df
-                comp_df = pass_df.copy()
+                save_dir = os.path.join(config.LOGS_DIR, f"{selected_team.replace(' ', '_')}_tgn_eval.md")
+                os.makedirs(config.LOGS_DIR, exist_ok=True)
+                report_md = generate_model_evaluation_report(eval_metrics, save_dir)
                 
-                # Add time_bin
-                bins = [0, 15, 30, 45, 60, 75, 90, 120]
-                labels = ['0-15', '15-30', '30-45', '45-60', '60-75', '75-90', '90+']
-                comp_df['time_bin'] = pd.cut(comp_df['minute'], bins=bins, labels=labels, right=False)
-                
-                # Add venue mapping
-                if 'match_id' in comp_df.columns and team_matches is not None:
-                    home_matches = team_matches[team_matches['home_team'] == selected_team]['match_id'].tolist()
-                    comp_df['venue'] = comp_df['match_id'].apply(lambda mx: 'Home' if mx in home_matches else 'Away')
-                else:
-                    comp_df['venue'] = 'Unknown'
-                    
-                # Build Comprehensive Profile
-                dna_comprehensive = {
-                    "overall": calculate_team_dna(comp_df)
-                }
-                
-                # Outcomes
-                dna_comprehensive["by_outcome"] = {}
-                if 'outcome_result' in comp_df.columns:
-                    for outcome in comp_df['outcome_result'].dropna().unique():
-                        dna_comprehensive["by_outcome"][str(outcome)] = calculate_team_dna(comp_df[comp_df['outcome_result'] == outcome])
-                
-                # Time Phases
-                dna_comprehensive["by_time_phase"] = {}
-                for phase in labels:
-                    phase_df = comp_df[comp_df['time_bin'] == phase]
-                    if not phase_df.empty:
-                        dna_comprehensive["by_time_phase"][str(phase)] = calculate_team_dna(phase_df)
-                
-                # Venue
-                dna_comprehensive["by_venue"] = {}
-                for venue in ['Home', 'Away']:
-                    v_df = comp_df[comp_df['venue'] == venue]
-                    if not v_df.empty:
-                        dna_comprehensive["by_venue"][str(venue)] = calculate_team_dna(v_df)
-                
-                # team_wise folders -> season files
-                safe_comp = selected_comp_name.replace("/", "_").replace(" ", "_")
-                safe_season = selected_season_name.replace("/", "_").replace(" ", "_")
-                safe_team = selected_team.replace("/", "_").replace(" ", "_")
-                
-                save_dir = os.path.join(config.DNA_DIR, safe_comp, safe_season, safe_team)
-                os.makedirs(save_dir, exist_ok=True)
-                
-                file_path = os.path.join(save_dir, "dna_profile.json")
-                with open(file_path, "w") as f:
-                    json.dump(dna_comprehensive, f, indent=4)
-                    
-                st.success(f"Comprehensive Team DNA saved successfully to `{file_path}`")
-                
-        with b2:
-            if st.button(f"🔬 Evaluate TransGoalNet"):
-                with st.spinner("Computing TransGoalNet evaluation metrics..."):
-                    from engine.transgoalnet import evaluate_transgoalnet
-                    from engine.metrics import generate_model_evaluation_report
-                    eval_metrics = evaluate_transgoalnet(pass_df, xt_model, trans_checkpoint_path)
-                    
-                    save_dir = os.path.join(config.LOGS_DIR, f"{selected_team.replace(' ', '_')}_tgn_eval.md")
-                    os.makedirs(config.LOGS_DIR, exist_ok=True)
-                    report_md = generate_model_evaluation_report(eval_metrics, save_dir)
-                    
-                    st.success(f"Evaluation Report saved to `{save_dir}`")
-                    with st.expander("View Evaluation Report", expanded=True):
-                        st.markdown(report_md)
+                st.success(f"Evaluation Report saved to `{save_dir}`")
+                with st.expander("View Evaluation Report", expanded=True):
+                    st.markdown(report_md)
 
 
         # --- ROW 2: VISUALIZATIONS ---
@@ -400,3 +345,43 @@ with tab2:
 
 with tab3:
     plot_tactical_heatmap(filtered_df, top_lane)
+
+with tab4:
+    scope = st.radio("Leaderboard Scope:", ["Current Season", "All-Time (All Seasons)"], horizontal=True)
+    
+    if scope == "Current Season":
+        if all_matches is not None and not all_matches.empty:
+            with st.spinner("Compiling Season Leaderboard..."):
+                leaderboard_df = calculate_championship_leaderboard(
+                    all_matches, 
+                    selected_comp_name, 
+                    selected_season_name, 
+                    config.DNA_DIR, 
+                    xt_model=xt_model,
+                    trans_checkpoint_path=trans_checkpoint_path
+                )
+                plot_championship_leaderboard(leaderboard_df)
+        else:
+            st.info("No matches available to compute the season leaderboard.")
+    else:
+        st.info(f"The All-Time Leaderboard aggregates historical match results and DNA profiles across **all available seasons** for **{selected_comp_name}**.")
+        if st.button("Load / Generate All-Time Leaderboard"):
+            with st.spinner("Computing All-Time Leaderboard (may take a moment if not cached)..."):
+                from utils.data_loader import get_competitions, get_matches
+                from engine.metrics import calculate_all_time_leaderboard
+                
+                leaderboard_df = calculate_all_time_leaderboard(
+                    selected_comp_name, 
+                    comp_id, 
+                    get_matches, 
+                    get_competitions,
+                    config.DNA_DIR, 
+                    config.LEADERBOARD_DIR,
+                    xt_model=xt_model,
+                    trans_checkpoint_path=trans_checkpoint_path
+                )
+                
+                if not leaderboard_df.empty:
+                    plot_championship_leaderboard(leaderboard_df)
+                else:
+                    st.error("Failed to generate the All-Time Leaderboard.")

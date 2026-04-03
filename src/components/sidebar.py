@@ -37,7 +37,7 @@ def render_data_selection():
     matches = get_matches(comp_id, season_id)
     if matches.empty:
         st.sidebar.warning("No matches found for this competition and season.")
-        return selected_comp_name, selected_season_name, None, pd.DataFrame()
+        return selected_comp_name, selected_season_name, None, pd.DataFrame(), pd.DataFrame(), comp_id
         
     # 3. Team Selection
     teams = pd.concat([matches['home_team'], matches['away_team']]).unique()
@@ -55,7 +55,7 @@ def render_data_selection():
     else:
         team_matches = matches[matches['away_team'] == selected_team]
         
-    return selected_comp_name, selected_season_name, selected_team, team_matches
+    return selected_comp_name, selected_season_name, selected_team, team_matches, matches, comp_id
 
 
 def render_analysis_controls(pass_df):

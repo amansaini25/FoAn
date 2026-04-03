@@ -7,8 +7,9 @@ DATA_DIR = os.path.join(BASE_DIR, 'data')
 ASSETS_DIR = os.path.join(BASE_DIR, 'assets')
 LOGS_DIR = os.path.join(BASE_DIR, 'logs')
 DNA_DIR = os.path.join(BASE_DIR, 'team_dna')
+LEADERBOARD_DIR = os.path.join(DATA_DIR, 'leaderboards')
 
-for d in [DATA_DIR, ASSETS_DIR, LOGS_DIR, DNA_DIR]:
+for d in [DATA_DIR, ASSETS_DIR, LOGS_DIR, DNA_DIR, LEADERBOARD_DIR]:
     os.makedirs(d, exist_ok=True)
 
 # File Paths
