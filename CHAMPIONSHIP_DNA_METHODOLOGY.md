@@ -31,7 +31,8 @@ $$ M_{norm_{i}} = \frac{M_i - \min(M_{all})}{\max(M_{all}) - \min(M_{all})} $$
 4. **Decentralization ($Dec$)**: $1 - \text{Centralization}_{norm}$. We reward teams whose network load is distributed across the pitch rather than relying on a single playmaker. Weight $w_4 = 0.20$.
 
 **TES Calculation:**
-$$ \text{TES} = (w_1 \times \overline{\text{Coh}}) + (w_2 \times \overline{\text{TxT}}) + (w_3 \times \overline{\text{BxT}}) + (w_4 \times \overline{\text{Dec}}) $$
+
+$$ TES = (w_1 \times \overline{Coh}) + (w_2 \times \overline{TxT}) + (w_3 \times \overline{BxT}) + (w_4 \times \overline{Dec}) $$
 
 Currently, the default heuristic weights are distributed as:
 - $w_1 = 0.25$, $w_2 = 0.35$, $w_3 = 0.20$, $w_4 = 0.20$
