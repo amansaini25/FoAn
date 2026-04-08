@@ -26,13 +26,13 @@
 4. **xT Evaluation Grid:** An interactive pitch heatmap grading the underlying spatial threat generation logic.
 5. **The Threat Pulse:** A timeline breaking down critical threat builders through 15-minute match phases.
 
-6: ## TransGoalNet Architecture
-7: We have recently upgraded the analytical capabilities from a Markov-based spatial `xT` grid to a robust Graph Transformer model called **TransGoalNet**.
+## TransGoalNet Architecture
+We have recently upgraded the analytical capabilities from a Markov-based spatial `xT` grid to a robust Graph Transformer model called **TransGoalNet**.
  
-8: - **Node Configuration**: Constructs graphs using a 10-feature player statistical profile (Goals, Dribbles, Pass %, Clearances, etc.).
-9: - **Temporal Context**: Evaluates a chronological sliding window ($k=20$ events) rather than analyzing isolated actions.
-10: - **Delta Expected Threat ($\Delta xT$)**: Directly predicts the net swing in offensive possession threat between consecutive nodes.
-11: - **Optimization Pipeline**: Implements Xavier Weight Initialization, PyTorch Adam with Weight Decay (`1e-4`), StepLR scheduling (halving every 10 epochs), and precise 5-epoch early stopping.
+1: - **Node Configuration**: Constructs graphs using a 10-feature player statistical profile (Goals, Dribbles, Pass %, Clearances, etc.).
+2: - **Temporal Context**: Evaluates a chronological sliding window ($k=20$ events) rather than analyzing isolated actions.
+3: - **Delta Expected Threat ($\Delta xT$)**: Directly predicts the net swing in offensive possession threat between consecutive nodes.
+4: - **Optimization Pipeline**: Implements Xavier Weight Initialization, PyTorch Adam with Weight Decay (`1e-4`), StepLR scheduling (halving every 10 epochs), and precise 5-epoch early stopping.
 
 ## Dashboard Previews
 
