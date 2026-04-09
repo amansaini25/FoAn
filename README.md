@@ -25,9 +25,12 @@
 3. **Expected Threat (xT) AI Model:** Employs a Markov-based dynamic programming approach to calculate the incremental probability of scoring from passing sequences. It handles full dataset training and caches the learned matrices natively for zero-latency inference.
 4. **xT Evaluation Grid:** An interactive pitch heatmap grading the underlying spatial threat generation logic.
 5. **The Threat Pulse:** A timeline breaking down critical threat builders through 15-minute match phases.
+6. **Championship DNA Leaderboard (CDI):** Synthesizes structural tactical efficacy via TES metrics against pure win/loss point gathering outcomes across full competition seasons.
+7. **MLR Metric Optimization:** Robust UI integration to natively run Multiple Linear Regression through Scikit-Learn. Models procedurally generate perfect weighting ratios correlating passing structure to actual winning metrics contextually for each league.
+8. **Global Asynchronous Training:** Headless background workflows natively orchestrate end-to-end TransGoalNet checkpoint training and 30% holdout split Evaluation analysis without halting the UI.
 
 ## TransGoalNet Architecture
-We have recently upgraded the analytical capabilities from a Markov-based spatial `xT` grid to a robust Graph Transformer model called **TransGoalNet**.
+We have completely implemented the analytical capabilities from a Markov-based spatial `xT` grid to a robust Graph Transformer model called **TransGoalNet**.
 
 1. **Node Configuration**: Constructs graphs using a 10-feature player statistical profile (Goals, Dribbles, Pass %, Clearances, etc.).
 2. **Temporal Context**: Evaluates a chronological sliding window ($k=20$ events) rather than analyzing isolated actions.
