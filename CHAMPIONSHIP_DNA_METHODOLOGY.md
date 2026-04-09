@@ -5,7 +5,35 @@ This document outlines the mathematical logic utilized to calculate the **Champi
 ## 1. Core Objectives
 The primary goal of the Championship DNA comparison is to evaluate if playing an aesthetically and structurally dominant style of football ("good DNA") functionally translates to winning games. We merge advanced network metrics (Expected Threat, passing coherence) with classic match outcome statistics.
 
-## 2. Match Results & Win/Loss Ratios
+## 2. Passing Network Graph Construction & Metrics
+
+All tactical identity structures are modeled using directed, weighted graphs derived directly from raw event data. 
+Let the passing network be represented as a directed graph $G = (V, E)$, where:
+- $V$ is the set of all unique players (nodes) who participated in a match.
+- $E$ is the set of directed passing interactions (edges) between players.
+- $w_{ij}$ represents the weight of the directed edge from player $i$ to player $j$, denoting the total volume of successful passes completed between them.
+
+From this base graph structure, we extract several core structural attributes:
+
+### Active Connected Volume (Passing Volume)
+Passing volume signifies a team's sheer possession control and connective activity. It is mathematically the total sum of edge weights in the directed graph network:
+$$ Volume = \sum_{i \in V} \sum_{j \in V} w_{ij} $$
+
+### Betweenness Centralization
+Centralization measures the structural reliance a team places on specific individual "playmakers". We compute this by first calculating the Betweenness Centrality ($C_B(v)$) for every node, which quantifies the fraction of shortest paths that pass through that node.
+Let $\sigma_{st}$ be the total number of shortest paths from node $s$ to node $t$, and $\sigma_{st}(v)$ be the number of those paths passing through $v$:
+$$ C_B(v) = \sum_{s \neq v \neq t \in V} \frac{\sigma_{st}(v)}{\sigma_{st}} $$
+
+Team Centralization is then calculated as the standard deviation ($\sigma$) of the betweenness centralities across all players in the network. A high Centralization indicates extreme reliance on a few star nodes, while low centralization dictates a decentralized, balanced passing architecture.
+$$ Centralization_{team} = \sqrt{\frac{1}{|V|} \sum_{v \in V} (C_B(v) - \mu_{C_B})^2}  $$
+
+### Triadic Cohesion (Clustering)
+Triadic cohesion quantifies the localized structural density of the team—essentially, how effectively localized clusters of players pass the ball dynamically in triangles to support one another.
+This is implemented by extracting the weighted clustering coefficient ($C(v)$) for every node. The team's overall Cohesion is the mean of these clustering values:
+$$ Cohesion_{team} = \frac{1}{|V|} \sum_{v \in V} C(v) $$
+Higher generalized cohesion represents strong, systemic short-range support structures universally embedded regardless of position.
+
+## 3. Match Results & Win/Loss Ratios
 For a selected team in a specific competition and season, their success is evaluated purely on their points trajectory.
 Assuming a team plays $N$ matches, having $W$ wins, $D$ draws, and $L$ losses:
 
@@ -17,7 +45,7 @@ The Win-Loss Spread naturally penalizes teams that lose frequently and rewards c
 
 $$ \hat{S}_{WL} = \frac{S_{WL} - \min(S_{WL})}{\max(S_{WL}) - \min(S_{WL})} $$
 
-## 3. Tactical Efficacy Score (TES)
+## 4. Tactical Efficacy Score (TES)
 The Tactical Efficacy Score represents a single numerical value outlining how "dominant" a team's passing network is. It aggregates our standard "Team DNA" metrics: `avg_cohesion`, `avg_xt`, `avg_trans_xt`, and `avg_centralization`.
 
 Before aggregation, each metric $M$ for every team is min-max normalized ($M_{norm}$) compared to the rest of the teams in the *same* championship:
@@ -39,7 +67,7 @@ Currently, the default heuristic weights are distributed as:
 
 *Note: The TES naturally scales from $0 \rightarrow 1$ assuming optimal components. An average team will sit around $0.4 - 0.6$.*
 
-## 3.1. Advanced TES Weighting Metrics (Mathematical Optimization)
+## 4.1. Advanced TES Weighting Metrics (Mathematical Optimization)
 While heuristic (expert-assigned) components offer baseline accuracy, findings natively suggest that the exact relationship governing elite play varies across competitions. To optimize the TES calculation without subjective bias, our framework dynamically applies robust statistical modeling natively within the metric algorithms.
 
 ### Implemented: Multiple Linear Regression (MLR)
@@ -54,7 +82,7 @@ The isolated, normalized coefficients ($\beta_1, \beta_2, \beta_3, \beta_4$) ext
 ### Future Enhancement: Principal Component Analysis (PCA)
 If teams exhibit heavily correlated behaviors (e.g., high $Coh$ almost always results in high $BxT$), calculating the Eigen-Vectors across the DNA Dataset will produce the "Principal Axis of Play" describing the ultimate variance in structural identity. Weighting metrics by their percentage contribution to $PC1$ constructs a fully data-driven equation for absolute network efficiency.
 
-## 4. Championship DNA Index (CDI)
+## 5. Championship DNA Index (CDI)
 The ultimate ranking metric merges tactical dominance with pure winning effectiveness. 
 
 $$ CDI = (TES \times \hat{S}_{WL}) \cdot 100 $$
@@ -64,7 +92,7 @@ $$ CDI = (TES \times \hat{S}_{WL}) \cdot 100 $$
 - **Moderate CDI (40-75)**: Good tactical blueprint but potentially lacking conversion into points, or an ugly-but-effective counter-attacking team that gathers points despite low passing network dominance.
 - **Low CDI (<40)**: Structurally disjointed teams suffering on both tactical output and match outcomes.
 
-## 5. Algorithmic Workflow
+## 6. Algorithmic Workflow
 1. Fetch all match-level data for all teams in the chosen Competition & Season using `statsbombpy`.
 2. Extract the Win/Loss results per team to calculate Spread ($S_{WL}$).
 3. Load previously cached DNA Profiles (`dna_profile.json`) or rapidly compute passing metrics via grouped arrays to evaluate $TES$.
