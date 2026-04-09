@@ -26,8 +26,8 @@ $$ M_{norm_{i}} = \frac{M_i - \min(M_{all})}{\max(M_{all}) - \min(M_{all})} $$
 
 ### Components of the TES:
 1. **Cohesion ($Coh$)**: Higher is better (dense triangle passing loops). Weight $w_1 = 0.25$.
-2. **Delta xT per Pass ($TxT$)**: TransGoalNet Expected Threat generated per pass. Weight $w_2 = 0.35$.
-3. **Basic xT per Pass ($BxT$)**: Baseline positional expected threat per pass. Weight $w_3 = 0.20$.
+2. **Delta xT per Match ($TxT$)**: TransGoalNet Expected Threat generated per match. Weight $w_2 = 0.35$.
+3. **Basic xT per Match ($BxT$)**: Baseline positional expected threat per match. Weight $w_3 = 0.20$.
 4. **Decentralization ($Dec$)**: $1 - \text{Centralization}_{norm}$. We reward teams whose network load is distributed across the pitch rather than relying on a single playmaker. Weight $w_4 = 0.20$.
 
 **TES Calculation:**
@@ -40,16 +40,18 @@ Currently, the default heuristic weights are distributed as:
 *Note: The TES naturally scales from $0 \rightarrow 1$ assuming optimal components. An average team will sit around $0.4 - 0.6$.*
 
 ## 3.1. Advanced TES Weighting Metrics (Mathematical Optimization)
-While heuristic (expert-assigned) components offer baseline accuracy, finding the exact relationship governing elite play requires empirical derivation. To optimize the TES calculation without subjective bias, you can apply robust statistical modeling:
+While heuristic (expert-assigned) components offer baseline accuracy, findings natively suggest that the exact relationship governing elite play varies across competitions. To optimize the TES calculation without subjective bias, our framework dynamically applies robust statistical modeling natively within the metric algorithms.
 
-### 1. Multiple Linear Regression (MLR)
-The precise influence of each component can be mapped to $Win_Ratio$ through OLS (Ordinary Least Squares) regression. By training a model where the DNA traits predict the actual championship win ratio:
-- `y_target` = $W_R$
-- `X_features` = $Coh, TxT, BxT, Dec$
+### Implemented: Multiple Linear Regression (MLR)
+The precise influence of each tactical parameter is mapped directly to actual $Win\_Ratio$ through an enforced-positive Ordinary Least Squares regression executed via Scikit-Learn. The application UI allows users to directly push a button to train an MLR model targeting the specific season (or an aggregated all-time history) live.
+- **Target Variable (`y`)**: Actual Championship Win Ratio ($W_R$)
+- **Input Features (`X`)**: Normalized parameter tensor $\rightarrow [Coh_{norm}, TxT_{norm}, BxT_{norm}, Dec_{norm}]$
 
-The normalized coefficients from the fitted linear equation $\beta_1, \beta_2, \beta_3, \beta_4$ seamlessly translate to perfectly optimized model weights ($w_1, w_2, w_3, w_4$) for that specific league's tactical meta.
+The isolated, normalized coefficients ($\beta_1, \beta_2, \beta_3, \beta_4$) extracted from the converged linear equation seamlessly translate into perfectly optimal, data-driven model structural weights ($w_1, w_2, w_3, w_4$) that perfectly represent that specific league's tactical meta. These exact floats are generated, securely cached to the local file system (`tes_mlr_weights.json`), and automatically parsed on render to construct the dynamic Championship Leaderboards.
 
-### 2. Principal Component Analysis (PCA)
+*(Note: In the isolated event where the MLR strictly converges onto negative correlations—mathematically invalidating the construct integrity of an additive score where zero represents absolute failure—the algorithm safely catches this and gracefully regresses to the generalized heuristic weights defined above).*
+
+### Future Enhancement: Principal Component Analysis (PCA)
 If teams exhibit heavily correlated behaviors (e.g., high $Coh$ almost always results in high $BxT$), calculating the Eigen-Vectors across the DNA Dataset will produce the "Principal Axis of Play" describing the ultimate variance in structural identity. Weighting metrics by their percentage contribution to $PC1$ constructs a fully data-driven equation for absolute network efficiency.
 
 ## 4. Championship DNA Index (CDI)

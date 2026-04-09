@@ -231,6 +231,66 @@ def get_team_match_results(matches_df):
         
     return df
 
+def train_tes_mlr_weights(leaderboard_df, save_path):
+    """
+    Trains a Multiple Linear Regression model from the leaderboard features
+    to optimize the TES weights. Saves the weights to JSON.
+    """
+    import json
+    from sklearn.linear_model import LinearRegression
+    import numpy as np
+
+    train_df = leaderboard_df[leaderboard_df['Has_DNA'] == True].copy()
+    
+    if len(train_df) < 5:
+        raise ValueError("Not enough teams with DNA profiles to train MLR reliably.")
+        
+    if 'Decent_Norm' not in train_df.columns:
+        train_df['Decent_Norm'] = 1.0 - train_df['Cent_Norm']
+        
+    X = train_df[['Coh_Norm', 'TxT_Norm', 'BxT_Norm', 'Decent_Norm']].values
+    y = train_df['Win_Ratio'].values # Targeting actual Win_Ratio
+    
+    # We use positive=True to ensure weights don't become negative (which would break the concept of a 'weight' score)
+    model = LinearRegression(positive=True)
+    model.fit(X, y)
+    
+    coefs = model.coef_
+    
+    # Normalize weights so they sum to 1
+    if np.sum(coefs) > 0:
+        coefs = coefs / np.sum(coefs)
+    else:
+        # Fallback to heuristics if model fails to find any positive correlation
+        coefs = np.array([0.25, 0.35, 0.20, 0.20])
+        
+    weights = {
+        'w_coh': float(coefs[0]),
+        'w_txt': float(coefs[1]),
+        'w_bxt': float(coefs[2]),
+        'w_decent': float(coefs[3])
+    }
+    
+    with open(save_path, 'w') as f:
+        json.dump(weights, f, indent=4)
+        
+    return weights
+
+def get_tes_weights(save_path):
+    """
+    Loads TES weights from JSON, returns heuristic defaults if not found.
+    """
+    import os
+    import json
+    if os.path.exists(save_path):
+        try:
+            with open(save_path, 'r') as f:
+                w = json.load(f)
+                return w.get('w_coh', 0.25), w.get('w_txt', 0.35), w.get('w_bxt', 0.20), w.get('w_decent', 0.20)
+        except Exception:
+            pass
+    return 0.25, 0.35, 0.20, 0.20
+
 def calculate_championship_leaderboard(matches_df, comp_name, season_name, dna_dir, xt_model=None, trans_checkpoint_path=None):
     """
     Constructs a ranking dataframe combining match results and DNA metrics 
@@ -344,12 +404,15 @@ def calculate_championship_leaderboard(matches_df, comp_name, season_name, dna_d
         merged_df['Cent_Norm'] = 0.5
         
     # Calculate TES and CDI
-    # Weightings: Coh: 0.25, TxT: 0.35, BxT: 0.20, Decent (1-Cent): 0.20
+    # Dynamically fetch weightings
+    weights_path = os.path.join(dna_dir, safe_comp, safe_season, "tes_mlr_weights.json")
+    w_coh, w_txt, w_bxt, w_decent = get_tes_weights(weights_path)
+    
     merged_df['Decent_Norm'] = 1.0 - merged_df['Cent_Norm']
-    merged_df['TES'] = (0.25 * merged_df['Coh_Norm']) + \
-                       (0.35 * merged_df['TxT_Norm']) + \
-                       (0.20 * merged_df['BxT_Norm']) + \
-                       (0.20 * merged_df['Decent_Norm'])
+    merged_df['TES'] = (w_coh * merged_df['Coh_Norm']) + \
+                       (w_txt * merged_df['TxT_Norm']) + \
+                       (w_bxt * merged_df['BxT_Norm']) + \
+                       (w_decent * merged_df['Decent_Norm'])
                        
     # If a team has no DNA saved, set TES to 0
     merged_df.loc[merged_df['Has_DNA'] == False, 'TES'] = 0.0
@@ -519,11 +582,14 @@ def calculate_all_time_leaderboard(comp_name, comp_id, get_matches_func, get_com
         merged_df['BxT_Norm'] = 0.5
         merged_df['Cent_Norm'] = 0.5
         
+    weights_path = os.path.join(dna_dir, safe_comp, "all_time_tes_mlr_weights.json")
+    w_coh, w_txt, w_bxt, w_decent = get_tes_weights(weights_path)
+
     merged_df['Decent_Norm'] = 1.0 - merged_df['Cent_Norm']
-    merged_df['TES'] = (0.25 * merged_df['Coh_Norm']) + \
-                       (0.35 * merged_df['TxT_Norm']) + \
-                       (0.20 * merged_df['BxT_Norm']) + \
-                       (0.20 * merged_df['Decent_Norm'])
+    merged_df['TES'] = (w_coh * merged_df['Coh_Norm']) + \
+                       (w_txt * merged_df['TxT_Norm']) + \
+                       (w_bxt * merged_df['BxT_Norm']) + \
+                       (w_decent * merged_df['Decent_Norm'])
                        
     merged_df.loc[merged_df['Has_DNA'] == False, 'TES'] = 0.0
     merged_df['CDI'] = merged_df['TES'] * merged_df['Spread_Norm'] * 100

@@ -361,11 +361,37 @@ with tab4:
                     trans_checkpoint_path=trans_checkpoint_path
                 )
                 plot_championship_leaderboard(leaderboard_df)
+                
+                # MLR Optimization UI for Current Season
+                st.markdown("---")
+                col_mlr1, col_mlr2 = st.columns([0.7, 0.3])
+                with col_mlr1:
+                    st.markdown("### 🧠 Advanced TES Weighting (MLR)")
+                    st.write("Train a Multiple Linear Regression model to find optimal metric weights based on this season's win ratios.")
+                with col_mlr2:
+                    if st.button("Optimize Weights (Current Season)", key="btn_mlr_curr"):
+                        from engine.metrics import train_tes_mlr_weights
+                        weights_path = os.path.join(config.DNA_DIR, selected_comp_name.replace("/", "_").replace(" ", "_"), selected_season_name.replace("/", "_").replace(" ", "_"), "tes_mlr_weights.json")
+                        try:
+                            # Note: Create directory if it doesn't exist
+                            os.makedirs(os.path.dirname(weights_path), exist_ok=True)
+                            new_weights = train_tes_mlr_weights(leaderboard_df, weights_path)
+                            st.success("Weights optimized successfully!")
+                            st.json(new_weights)
+                            import time
+                            time.sleep(2) # Give user a moment to see before reloading
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"Failed to optimize weights: {e}")
         else:
             st.info("No matches available to compute the season leaderboard.")
     else:
         st.info(f"The All-Time Leaderboard aggregates historical match results and DNA profiles across **all available seasons** for **{selected_comp_name}**.")
         if st.button("Load / Generate All-Time Leaderboard"):
+            # Set a session state flag so that the dataframe persists explicitly without hiding when re-rendering components
+            st.session_state['show_all_time'] = True
+            
+        if st.session_state.get('show_all_time', False):
             with st.spinner("Computing All-Time Leaderboard (may take a moment if not cached)..."):
                 from utils.data_loader import get_competitions, get_matches
                 from engine.metrics import calculate_all_time_leaderboard
@@ -383,5 +409,31 @@ with tab4:
                 
                 if not leaderboard_df.empty:
                     plot_championship_leaderboard(leaderboard_df)
+                    
+                    # MLR Optimization UI for All-Time
+                    st.markdown("---")
+                    col_mlr1, col_mlr2 = st.columns([0.7, 0.3])
+                    with col_mlr1:
+                        st.markdown("### 🧠 Advanced TES Weighting (All-Time MLR)")
+                        st.write("Train an MLR model targeting all-time performance statistics across all seasons for this competition.")
+                    with col_mlr2:
+                        if st.button("Optimize Weights (All-Time)", key="btn_mlr_alltime"):
+                            from engine.metrics import train_tes_mlr_weights
+                            weights_path = os.path.join(config.DNA_DIR, selected_comp_name.replace("/", "_").replace(" ", "_"), "all_time_tes_mlr_weights.json")
+                            try:
+                                os.makedirs(os.path.dirname(weights_path), exist_ok=True)
+                                new_weights = train_tes_mlr_weights(leaderboard_df, weights_path)
+                                st.success("All-Time weights optimized successfully! Generating Leaderboard using new weights...")
+                                
+                                # Invalidate cache so it recalculates using new weights
+                                cache_file = os.path.join(config.LEADERBOARD_DIR, f"{selected_comp_name.replace('/', '_').replace(' ', '_')}_all_seasons.csv")
+                                if os.path.exists(cache_file):
+                                    os.remove(cache_file)
+                                    
+                                import time
+                                time.sleep(2)
+                                st.rerun()
+                            except Exception as e:
+                                st.error(f"Failed to optimize weights: {e}")
                 else:
                     st.error("Failed to generate the All-Time Leaderboard.")
