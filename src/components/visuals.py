@@ -103,7 +103,7 @@ def plot_xt_grid(xt_model):
     plt.colorbar(im, ax=ax, fraction=0.046, pad=0.04, label="Expected Threat (xT)")
     st.pyplot(fig)
 
-def plot_dna_radar(dna_metrics):
+def plot_dna_radar(dna_metrics, save_path=None, cdi=None):
     """Plots a normalized Radar Chart for Team DNA."""
     if not dna_metrics:
         return
@@ -131,25 +131,26 @@ def plot_dna_radar(dna_metrics):
     angles = np.linspace(0, 2 * np.pi, len(categories), endpoint=False).tolist()
     angles += angles[:1]
     
-    fig, ax = plt.subplots(figsize=(5, 5), subplot_kw=dict(polar=True))
+    fig, ax = plt.subplots(figsize=(6, 6), subplot_kw=dict(polar=True))
     fig.patch.set_facecolor('none')
     ax.set_facecolor('none')
     
     # Draw plot
-    ax.plot(angles, values, color='#00ff85', linewidth=2)
-    ax.fill(angles, values, color='#00ff85', alpha=0.25)
+    ax.plot(angles, values, color='#00ff85', linewidth=2, zorder=3)
+    ax.fill(angles, values, color='#00ff85', alpha=0.25, zorder=3)
     
     # Set category labels
     ax.set_xticks(angles[:-1])
-    ax.set_xticklabels(categories, size=10, weight='bold', color='white')
+    ax.set_xticklabels(categories, size=9, weight='bold', color='white')
+    ax.tick_params(axis='x', pad=55)
     
     # Formatting
-    ax.set_ylim(0, 1)
+    ax.set_ylim(0, 1.2)
     ax.set_yticklabels([]) # Hide radial ticks
     ax.spines['polar'].set_color('#555555')
     ax.grid(color='#555555', linestyle='--', linewidth=0.5)
     
-    # Add actual values as text
+    # Add actual values as text outside the circle
     for angle, value, raw_value in zip(angles[:-1], values[:-1], raw_values):
         ha = 'center'
         if 0.1 < angle < np.pi - 0.1:       # Right half
@@ -163,7 +164,19 @@ def plot_dna_radar(dna_metrics):
         else:
             val_text = f" {raw_value:.2f} "
             
-        ax.text(angle, value + 0.15, val_text, size=10, color='#ff4b4b', ha=ha, va='center', weight='bold')
+        ax.text(angle, 1.30, val_text, size=9, color='#00ff85', ha=ha, va='center', weight='bold')
+        
+    # Plot CDI Ring if provided
+    if cdi is not None:
+        norm_cdi = max(0.01, min(cdi / 100.0, 1.0))
+        circle_angles = np.linspace(0, 2 * np.pi, 100)
+        ax.plot(circle_angles, [norm_cdi]*100, color='gold', linestyle='--', linewidth=2, alpha=0.8, zorder=2)
+        ax.text(np.pi/4, norm_cdi + 0.08, f"CDI: {cdi:.2f}", color='gold', size=10, weight='bold', ha='center', va='center', zorder=5)
+        
+    fig.tight_layout()
+    
+    if save_path:
+        fig.savefig(save_path, bbox_inches='tight', transparent=True)
         
     st.pyplot(fig)
 

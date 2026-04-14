@@ -362,6 +362,67 @@ with tab4:
                 )
                 plot_championship_leaderboard(leaderboard_df)
                 
+                st.markdown("---")
+                st.subheader("🧬 Batch Visualise & Export Team DNA")
+                st.write("Generate and securely save the DNA Radar plots for every team in the ranked leaderboard, or load existing ones instantly.")
+                
+                col_b1, col_b2 = st.columns(2)
+                with col_b1:
+                    btn_export = st.button("Generate & Export Radars", key="btn_batch_export")
+                with col_b2:
+                    btn_load = st.button("Load Saved Radars", key="btn_batch_load")
+                    
+                if btn_export or btn_load:
+                    import json
+                    safe_comp = selected_comp_name.replace("/", "_").replace(" ", "_")
+                    safe_season = selected_season_name.replace("/", "_").replace(" ", "_")
+                    
+                    st.success(f"Processing {len(leaderboard_df)} teams...")
+                    progress_text = "Saving radars locally..." if btn_export else "Loading saved radars..."
+                    my_bar = st.progress(0, text=progress_text)
+                    
+                    # Columns to render neatly
+                    cols = st.columns(3)
+                    
+                    for idx, row in leaderboard_df.iterrows():
+                        team = row['Team']
+                        safe_team = team.replace("/", "_").replace(" ", "_")
+                        profile_path = os.path.join(config.DNA_DIR, safe_comp, safe_season, safe_team, "dna_profile.json")
+                        save_path = os.path.join(config.DNA_DIR, safe_comp, safe_season, safe_team, f"{safe_team}_radar.png")
+                        
+                        col = cols[idx % 3] # Distribute 3 per row
+                        
+                        if btn_load:
+                            if os.path.exists(save_path):
+                                with col:
+                                    st.markdown(f"**#{idx+1}. {team}**")
+                                    st.image(save_path, use_container_width=True)
+                            else:
+                                with col:
+                                    st.warning(f"No saved radar for {team}")
+                        elif btn_export:
+                            if os.path.exists(profile_path):
+                                with open(profile_path, "r") as f:
+                                    data = json.load(f)
+                                    overall = data.get("overall", {})
+                                    if overall:
+                                        with col:
+                                            st.markdown(f"**#{idx+1}. {team}**")
+                                            plot_dna_radar(overall, save_path=save_path, cdi=row.get('CDI'))
+                                    else:
+                                        with col:
+                                            st.warning(f"No DNA data for {team}")
+                            else:
+                                with col:
+                                    st.warning(f"No profile found: {team}")
+                                
+                        my_bar.progress((idx + 1) / len(leaderboard_df), text=f"Processed #{idx+1} {team}")
+                        
+                    if btn_export:
+                        st.success(f"Successfully processed all {len(leaderboard_df)} radar plots. Check your local `{config.DNA_DIR}` directory!")
+                    elif btn_load:
+                        st.success("Finished loading saved radars.")
+                
                 # MLR Optimization UI for Current Season
                 st.markdown("---")
                 col_mlr1, col_mlr2 = st.columns([0.7, 0.3])
