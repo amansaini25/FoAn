@@ -98,7 +98,7 @@ class TransGoalNet(nn.Module):
         
         return y_hat, x
 
-def prepare_transgoalnet_dataset(actions_df, basic_xt_model, k_window=20):
+def prepare_transgoalnet_dataset(actions_df, basic_xt_model, k_window=5):
     """ Builds Graph nodes and edges for batches using sliding temporal window. """
     actions_df = actions_df.copy()
     if 'xT' not in actions_df.columns:
@@ -371,6 +371,8 @@ def apply_transgoalnet_inference(df, basic_xt_model, model_checkpoint_path):
         df_mapped['match_id'] = 'unknown_match'
     if 'player_name' not in df_mapped.columns and 'player' in df_mapped.columns:
         df_mapped['player_name'] = df_mapped['player']
+        
+    df_mapped['idx'] = df_mapped.index
         
     graphs, max_n_val = prepare_transgoalnet_dataset(df_mapped, basic_xt_model)
     

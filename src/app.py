@@ -48,7 +48,7 @@ else:
 # NAVIGATION
 # ==========================================
 st.sidebar.markdown("---")
-nav_mode = st.sidebar.radio("Dashboard Mode", ["Visual Analytics", "Model Pipeline & Optimization"])
+nav_mode = st.sidebar.radio("Dashboard Mode", ["Visual Analytics", "DNA Split Analysis", "Model Pipeline & Optimization"])
 
 import json
 import time
@@ -382,6 +382,86 @@ if nav_mode == "Model Pipeline & Optimization" and team_matches is not None and 
             except Exception as e:
                 st.error(f"Failed to optimize weights: {e}")
         st.session_state['run_opt_all'] = False
+
+elif nav_mode == "DNA Split Analysis" and team_matches is not None and not team_matches.empty:
+    st.header(f"🧬 DNA Split Analysis: {selected_team}")
+    st.markdown("Comparing the team's historical average DNA against their tactical identity in explicitly won and lost matches to determine absolute CDI shifts across identical global boundaries.")
+    
+    safe_comp = selected_comp_name.replace("/", "_").replace(" ", "_")
+    safe_season = selected_season_name.replace("/", "_").replace(" ", "_")
+    safe_team = selected_team.replace("/", "_").replace(" ", "_")
+    profile_path = os.path.join(config.DNA_DIR, safe_comp, safe_season, safe_team, "dna_profile.json")
+    
+    with st.spinner("Compiling contextual splits..."):
+        if os.path.exists(profile_path):
+            with open(profile_path, "r") as f:
+                dna_data = json.load(f)
+            overall = dna_data.get("overall", {})
+            by_outcome = dna_data.get("by_outcome", {})
+            win_stats = by_outcome.get("Win", {})
+            loss_stats = by_outcome.get("Loss", {})
+            draw_stats = by_outcome.get("Draw", {})
+            
+            from engine.metrics import calculate_championship_leaderboard, get_tes_weights
+            leaderboard_df = calculate_championship_leaderboard(all_matches, selected_comp_name, selected_season_name, config.DNA_DIR, xt_model=xt_model, trans_checkpoint_path=trans_checkpoint_path)
+            
+            weights_path = os.path.join(config.DNA_DIR, safe_comp, safe_season, "tes_mlr_weights.json")
+            if os.path.exists(weights_path):
+                w_coh, w_txt, w_bxt = get_tes_weights(weights_path)
+            else:
+                w_coh, w_txt, w_bxt = 0.33, 0.34, 0.33
+            
+            if not leaderboard_df.empty and len(leaderboard_df) > 1 and selected_team in leaderboard_df['Team'].values:
+                team_row = leaderboard_df[leaderboard_df['Team'] == selected_team].iloc[0]
+                spread_norm = team_row.get('Spread_Norm', 0.5)
+                
+                def calc_cdi(subset_dict):
+                    if not subset_dict: return 0.0
+                    c_min_coh = leaderboard_df['Cohesion'].min()
+                    c_max_coh = leaderboard_df['Cohesion'].max()
+                    c_min_txt = leaderboard_df['Trans_xT'].min()
+                    c_max_txt = leaderboard_df['Trans_xT'].max()
+                    c_min_bxt = leaderboard_df['Basic_xT'].min()
+                    c_max_bxt = leaderboard_df['Basic_xT'].max()
+                    
+                    coh_norm = (subset_dict.get('avg_cohesion', 0) - c_min_coh) / (c_max_coh - c_min_coh) if c_max_coh != c_min_coh else 0.5
+                    txt_norm = (subset_dict.get('avg_trans_xt', 0) - c_min_txt) / (c_max_txt - c_min_txt) if c_max_txt != c_min_txt else 0.5
+                    bxt_norm = (subset_dict.get('avg_xt', 0) - c_min_bxt) / (c_max_bxt - c_min_bxt) if c_max_bxt != c_min_bxt else 0.5
+                    
+                    tes = (w_coh * coh_norm) + (w_txt * txt_norm) + (w_bxt * bxt_norm)
+                    return max(0.0, tes * spread_norm * 100)
+                
+                cdi_overall = calc_cdi(overall)
+                cdi_win = calc_cdi(win_stats)
+                cdi_loss = calc_cdi(loss_stats)
+                cdi_draw = calc_cdi(draw_stats)
+                
+                col1, col2, col3, col4 = st.columns(4)
+                with col1:
+                    st.markdown(f"**🛡️ Historical (CDI: {cdi_overall:.2f})**")
+                    if overall:
+                        plot_dna_radar(overall, cdi=cdi_overall)
+                    else: st.warning("No data")
+                with col2:
+                    st.markdown(f"**🏆 Wins (CDI: {cdi_win:.2f})**")
+                    if win_stats:
+                        plot_dna_radar(win_stats, cdi=cdi_win)
+                    else: st.warning("No wins found")
+                with col3:
+                    st.markdown(f"**⚠️ Losses (CDI: {cdi_loss:.2f})**")
+                    if loss_stats:
+                        plot_dna_radar(loss_stats, cdi=cdi_loss)
+                    else: st.warning("No losses found")
+                with col4:
+                    st.markdown(f"**⚖️ Draws (CDI: {cdi_draw:.2f})**")
+                    if draw_stats:
+                        plot_dna_radar(draw_stats, cdi=cdi_draw)
+                    else: st.warning("No draws found")
+            else:
+                st.warning("Could not contextualize CDI against the leaderboard minimums and maximums.")
+                
+        else:
+            st.error("Team DNA profile not found. Please navigate to the Leaderboard to Batch Render team profiles.")
 
 elif nav_mode == "Visual Analytics" and team_matches is not None and not team_matches.empty:
     # ==========================================

@@ -233,46 +233,53 @@ def get_team_match_results(matches_df):
 
 def train_tes_mlr_weights(leaderboard_df, save_path):
     """
-    Trains a Multiple Linear Regression model from the leaderboard features
-    to optimize the TES weights. Saves the weights to JSON.
+    Trains a specialized bounded optimizer from the leaderboard features
+    to optimize the TES weights, avoiding the collapse of MLR variables.
     """
     import json
-    from sklearn.linear_model import LinearRegression
     import numpy as np
+    from scipy.optimize import minimize
 
     train_df = leaderboard_df[leaderboard_df['Has_DNA'] == True].copy()
     
     if len(train_df) < 5:
-        raise ValueError("Not enough teams with DNA profiles to train MLR reliably.")
+        raise ValueError("Not enough teams with DNA profiles to train optimizer reliably.")
         
-    if 'Decent_Norm' not in train_df.columns:
-        train_df['Decent_Norm'] = 1.0 - train_df['Cent_Norm']
-        
-    X = train_df[['Coh_Norm', 'TxT_Norm', 'BxT_Norm', 'Decent_Norm']].values
+    X = train_df[['Coh_Norm', 'TxT_Norm', 'BxT_Norm']].values
     y = train_df['Win_Ratio'].values # Targeting actual Win_Ratio
     
-    # We use positive=True to ensure weights don't become negative (which would break the concept of a 'weight' score)
-    model = LinearRegression(positive=True)
-    model.fit(X, y)
+    # Objective function: Mean Squared Error
+    def objective(w):
+        preds = np.dot(X, w)
+        return np.mean((y - preds) ** 2)
+        
+    # Bounds: allow weights to move into negative freely to respect actual correlations
+    bnds = tuple((None, None) for _ in range(3))
     
-    r2_score = float(model.score(X, y))
-    preds = model.predict(X)
+    # Initial guess
+    initial_w = np.array([0.33, 0.34, 0.33])
+    
+    # Optimize without sum constraints (acting as pure OLS Linear Regression)
+    res = minimize(objective, initial_w, bounds=bnds)
+    
+    if res.success:
+        coefs = res.x
+    else:
+        coefs = initial_w
+        
+    # Compute performance metrics
+    preds = np.dot(X, coefs)
     mse = float(np.mean((y - preds) ** 2))
     
-    coefs = model.coef_
+    # R2 Score calculation
+    ss_tot = np.sum((y - np.mean(y)) ** 2)
+    ss_res = np.sum((y - preds) ** 2)
+    r2_score = float(1.0 - (ss_res / ss_tot)) if ss_tot > 0 else 0.0
     
-    # Normalize weights so they sum to 1
-    if np.sum(coefs) > 0:
-        coefs = coefs / np.sum(coefs)
-    else:
-        # Fallback to heuristics if model fails to find any positive correlation
-        coefs = np.array([0.25, 0.35, 0.20, 0.20])
-        
     weights = {
         'w_coh': float(coefs[0]),
         'w_txt': float(coefs[1]),
         'w_bxt': float(coefs[2]),
-        'w_decent': float(coefs[3]),
         'r2_score': r2_score,
         'mse': mse
     }
@@ -292,10 +299,10 @@ def get_tes_weights(save_path):
         try:
             with open(save_path, 'r') as f:
                 w = json.load(f)
-                return w.get('w_coh', 0.25), w.get('w_txt', 0.35), w.get('w_bxt', 0.20), w.get('w_decent', 0.20)
+                return w.get('w_coh', 0.33), w.get('w_txt', 0.34), w.get('w_bxt', 0.33)
         except Exception:
             pass
-    return 0.25, 0.35, 0.20, 0.20
+    return 0.33, 0.34, 0.33
 
 def calculate_championship_leaderboard(matches_df, comp_name, season_name, dna_dir, xt_model=None, trans_checkpoint_path=None):
     """
@@ -401,24 +408,20 @@ def calculate_championship_leaderboard(matches_df, comp_name, season_name, dna_d
         merged_df.loc[valid_dna.index, 'Coh_Norm'] = min_max('Cohesion')
         merged_df.loc[valid_dna.index, 'TxT_Norm'] = min_max('Trans_xT')
         merged_df.loc[valid_dna.index, 'BxT_Norm'] = min_max('Basic_xT')
-        merged_df.loc[valid_dna.index, 'Cent_Norm'] = min_max('Centralization')
         
     else:
         merged_df['Coh_Norm'] = 0.5
         merged_df['TxT_Norm'] = 0.5
         merged_df['BxT_Norm'] = 0.5
-        merged_df['Cent_Norm'] = 0.5
         
     # Calculate TES and CDI
     # Dynamically fetch weightings
     weights_path = os.path.join(dna_dir, safe_comp, safe_season, "tes_mlr_weights.json")
-    w_coh, w_txt, w_bxt, w_decent = get_tes_weights(weights_path)
+    w_coh, w_txt, w_bxt = get_tes_weights(weights_path)
     
-    merged_df['Decent_Norm'] = 1.0 - merged_df['Cent_Norm']
     merged_df['TES'] = (w_coh * merged_df['Coh_Norm']) + \
                        (w_txt * merged_df['TxT_Norm']) + \
-                       (w_bxt * merged_df['BxT_Norm']) + \
-                       (w_decent * merged_df['Decent_Norm'])
+                       (w_bxt * merged_df['BxT_Norm'])
                        
     # If a team has no DNA saved, set TES to 0
     merged_df.loc[merged_df['Has_DNA'] == False, 'TES'] = 0.0
@@ -581,21 +584,17 @@ def calculate_all_time_leaderboard(comp_name, comp_id, get_matches_func, get_com
         merged_df.loc[valid_dna.index, 'Coh_Norm'] = min_max('Cohesion')
         merged_df.loc[valid_dna.index, 'TxT_Norm'] = min_max('Trans_xT')
         merged_df.loc[valid_dna.index, 'BxT_Norm'] = min_max('Basic_xT')
-        merged_df.loc[valid_dna.index, 'Cent_Norm'] = min_max('Centralization')
     else:
         merged_df['Coh_Norm'] = 0.5
         merged_df['TxT_Norm'] = 0.5
         merged_df['BxT_Norm'] = 0.5
-        merged_df['Cent_Norm'] = 0.5
         
     weights_path = os.path.join(dna_dir, safe_comp, "all_time_tes_mlr_weights.json")
-    w_coh, w_txt, w_bxt, w_decent = get_tes_weights(weights_path)
+    w_coh, w_txt, w_bxt = get_tes_weights(weights_path)
 
-    merged_df['Decent_Norm'] = 1.0 - merged_df['Cent_Norm']
     merged_df['TES'] = (w_coh * merged_df['Coh_Norm']) + \
                        (w_txt * merged_df['TxT_Norm']) + \
-                       (w_bxt * merged_df['BxT_Norm']) + \
-                       (w_decent * merged_df['Decent_Norm'])
+                       (w_bxt * merged_df['BxT_Norm'])
                        
     merged_df.loc[merged_df['Has_DNA'] == False, 'TES'] = 0.0
     merged_df['CDI'] = merged_df['TES'] * merged_df['Spread_Norm'] * 100
