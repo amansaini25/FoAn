@@ -255,6 +255,10 @@ def train_tes_mlr_weights(leaderboard_df, save_path):
     model = LinearRegression(positive=True)
     model.fit(X, y)
     
+    r2_score = float(model.score(X, y))
+    preds = model.predict(X)
+    mse = float(np.mean((y - preds) ** 2))
+    
     coefs = model.coef_
     
     # Normalize weights so they sum to 1
@@ -268,7 +272,9 @@ def train_tes_mlr_weights(leaderboard_df, save_path):
         'w_coh': float(coefs[0]),
         'w_txt': float(coefs[1]),
         'w_bxt': float(coefs[2]),
-        'w_decent': float(coefs[3])
+        'w_decent': float(coefs[3]),
+        'r2_score': r2_score,
+        'mse': mse
     }
     
     with open(save_path, 'w') as f:

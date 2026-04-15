@@ -284,6 +284,10 @@ def train_transgoalnet(graphs, max_n, epochs=15, batch_size=64, lr=1e-3, device=
     patience_counter = 0
     patience_limit = 5
     
+    train_history = {"epochs": [], "loss": [], "lr": []}
+    log_path = os.path.join(config.LOGS_DIR, "tgn_training_log.json")
+    os.makedirs(config.LOGS_DIR, exist_ok=True)
+    
     model.train()
     for ep in range(epochs):
         ep_loss = 0
@@ -301,8 +305,17 @@ def train_transgoalnet(graphs, max_n, epochs=15, batch_size=64, lr=1e-3, device=
             ep_loss += loss.item() * len(batch)
             
         avg_loss = ep_loss / len(graphs)
-        print(f"Epoch {ep+1}/{epochs} | Loss: {avg_loss:.6f} | LR: {scheduler.get_last_lr()[0]:.6f}")
+        current_lr = scheduler.get_last_lr()[0]
+        print(f"Epoch {ep+1}/{epochs} | Loss: {avg_loss:.6f} | LR: {current_lr:.6f}")
         scheduler.step()
+        
+        train_history['epochs'].append(ep + 1)
+        train_history['loss'].append(avg_loss)
+        train_history['lr'].append(current_lr)
+        
+        with open(log_path, 'w') as f:
+            import json
+            json.dump(train_history, f)
         
         # Early Stopping Logic
         if avg_loss < best_loss:

@@ -148,10 +148,17 @@ class ExpectedThreat:
         return self
 
     def _solve(self):
+        import json
+        import os
+        import config
         gs = self.scoring_prob_matrix * self.shot_prob_matrix
         diff = np.ones((self.w, self.l), dtype=np.float64)
         it = 0
         self.heatmaps.append(self.xT.copy())
+        
+        train_history = {"iteration": [], "max_diff": []}
+        log_path = os.path.join(config.ASSETS_DIR, "xt_training_log.json")
+        os.makedirs(config.ASSETS_DIR, exist_ok=True)
 
         while np.any(diff > self.eps):
             # Fast vectorized payoff calculation
@@ -159,10 +166,17 @@ class ExpectedThreat:
             
             newxT = gs + (self.move_prob_matrix * total_payoff)
             diff = newxT - self.xT
+            max_diff_val = float(diff.max())
             self.xT = newxT
             self.heatmaps.append(self.xT.copy())
             it += 1
-            if it > 5:
+            
+            train_history["iteration"].append(it)
+            train_history["max_diff"].append(max_diff_val)
+            with open(log_path, 'w') as f:
+                json.dump(train_history, f)
+                
+            if it > 1000:
                 logger.warning("xT solver stopped after 1000 iterations.")
                 break
 
