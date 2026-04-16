@@ -28,7 +28,7 @@ Team Centralization is then calculated as the standard deviation ($\sigma$) of t
 $$\text{Centralization}_{\text{team}} = \sqrt{\frac{1}{|V|} \sum_{v \in V} (C_B(v) - \mu_{C_B})^2}&&
 
 ### Triadic Cohesion (Clustering)
-Triadic cohesion quantifies the localized structural density of the team—essentially, how effectively localized clusters of players pass the ball dynamically in triangles to support one another.
+Triadic cohesion quantifies the localized structural density of the team essentially, how effectively localized clusters of players pass the ball dynamically in triangles to support one another.
 This is implemented by extracting the weighted clustering coefficient ($C(v)$) for every node. The team's overall Cohesion is the mean of these clustering values:
 $$ Cohesion_{team} = \frac{1}{|V|} \sum_{v \in V} C(v) $$
 Higher generalized cohesion represents strong, systemic short-range support structures universally embedded regardless of position.
