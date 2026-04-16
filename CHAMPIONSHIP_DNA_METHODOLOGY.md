@@ -26,7 +26,8 @@ Let $\sigma_{st}$ be the total number of shortest paths from node $s$ to node $t
 $$C_B(v) = \sum_{s \neq v \neq t \in V} \frac{\sigma_{st}(v)}{\sigma_{st}}$$
 
 Team Centralization is then calculated as the standard deviation ($\sigma$) of the betweenness centralities across all players in the network. A high Centralization indicates extreme reliance on a few star nodes, while low centralization dictates a decentralized, balanced passing architecture.
-$$\text{Centralization}_{\text{team}} = \sqrt{\frac{1}{|V|} \sum_{v \in V} (C_B(v) - \mu_{C_B})^2}$$
+
+$$\text{Centralization}_{\text{team}} = \sqrt{\frac{1}{|V|} \sum_{v \in V} \left( C_B(v) - \mu_{C_B} \right)^2}$$
 
 ### Triadic Cohesion (Clustering)
 Triadic cohesion quantifies the localized structural density of the team essentially, how effectively localized clusters of players pass the ball dynamically in triangles to support one another.
