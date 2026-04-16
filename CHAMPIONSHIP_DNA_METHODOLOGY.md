@@ -17,7 +17,7 @@ From this base graph structure, we extract several core structural attributes:
 
 ### Active Connected Volume (Passing Volume)
 Passing volume signifies a team's sheer possession control and connective activity. It is mathematically the total sum of edge weights in the directed graph network:
-$$ Volume = \sum_{i \in V} \sum_{j \in V} w_{ij} $$
+$$\text{Volume} = \sum_{i \in V} \sum_{j \in V} w_{ij}$$
 
 ### Betweenness Centralization
 Centralization measures the structural reliance a team places on specific individual "playmakers". We compute this by first calculating the Betweenness Centrality ($C_B(v)$) for every node, which quantifies the fraction of shortest paths that pass through that node.
@@ -25,7 +25,7 @@ Let $\sigma_{st}$ be the total number of shortest paths from node $s$ to node $t
 $$C_B(v) = \sum_{s \neq v \neq t \in V} \frac{\sigma_{st}(v)}{\sigma_{st}}$$
 
 Team Centralization is then calculated as the standard deviation ($\sigma$) of the betweenness centralities across all players in the network. A high Centralization indicates extreme reliance on a few star nodes, while low centralization dictates a decentralized, balanced passing architecture.
-$$\text{Centralization}_{\text{team}} = \sqrt{\frac{1}{|V|} \sum_{v \in V} \left( C_B(v) - \mu_{C_B} \right)^2}$$
+$$\text{Centralization_team} = \sqrt{\frac{1}{|V|} \sum_{v \in V} \left( C_B(v) - \mu_{C_B} \right)^2}$$
 
 ### Triadic Cohesion (Clustering)
 Triadic cohesion quantifies the localized structural density of the team—essentially, how effectively localized clusters of players pass the ball dynamically in triangles to support one another.
