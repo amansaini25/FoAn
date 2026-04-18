@@ -20,7 +20,7 @@ Passing volume signifies a team's sheer possession control and connective activi
 $$\text{Volume} = \sum_{i \in V} \sum_{j \in V} w_{ij}$$
 
 ### Betweenness Centralization
-Centralization measures the structural reliance a team places on specific individual "playmakers". We compute this by first calculating the Betweenness Centrality ($C_B(v)$) for every node, which quantifies the fraction of shortest paths that pass through that node.
+Centralization measures the structural reliance a team places on specific individual "playmakers". We compute this by first calculating the Betweenness Centrality ($$C_B(v)$$) for every node, which quantifies the fraction of shortest paths that pass through that node.
 Let $\sigma_{st}$ be the total number of shortest paths from node $s$ to node $t$, and $\sigma_{st}(v)$ be the number of those paths passing through 
 
 $$C_B(v) = \sum_{s \neq v \neq t \in V} \frac{\sigma_{st}(v)}{\sigma_{st}}$$
