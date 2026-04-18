@@ -45,7 +45,7 @@ Assuming a team plays $N$ matches, having $W$ wins, $D$ draws, and $L$ losses:
 - **Loss Ratio ($L_R$)**: $\displaystyle L_R = \frac{L}{N}$
 - **Win-Loss Spread ($S_{WL}$)**: $\displaystyle S_{WL} = W_R - L_R$
 
-The Win-Loss Spread naturally penalizes teams that lose frequently and rewards consistent winners, bound roughly between $[-1, 1]$. In practical terms, to avoid negative indices, we normalize $S_{WL}$ across the championship to a $0 \rightarrow 1$ scale:
+The Win-Loss Spread naturally penalizes teams that lose frequently and rewards consistent winners, bound roughly between $[-1, 1]$. In practical terms, to avoid negative indices, we normalize $S_{WL}$ across the championship to a $$0 \rightarrow 1$$ scale:
 
 $$ \hat{S}_{WL} = \frac{S_{WL} - \min(S_{WL})}{\max(S_{WL}) - \min(S_{WL})} $$
 
@@ -69,7 +69,7 @@ $$ TES = (w_1 \times \overline{Coh}) + (w_2 \times \overline{TxT}) + (w_3 \times
 Currently, the default heuristic weights are distributed as:
 - $w_1 = 0.25$, $w_2 = 0.35$, $w_3 = 0.20$, $w_4 = 0.20$
 
-*Note: The TES naturally scales from $0 \rightarrow 1$ assuming optimal components. An average team will sit around $0.4 - 0.6$.*
+*Note: The TES naturally scales from $$0 \rightarrow 1$$ assuming optimal components. An average team will sit around $$0.4 - 0.6$$.*
 
 ## 4.1. Advanced TES Weighting Metrics (Mathematical Optimization)
 While heuristic (expert-assigned) components offer baseline accuracy, findings natively suggest that the exact relationship governing elite play varies across competitions. To optimize the TES calculation without subjective bias, our framework dynamically applies robust statistical modeling natively within the metric algorithms.
