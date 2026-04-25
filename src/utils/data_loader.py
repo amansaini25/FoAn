@@ -46,6 +46,23 @@ def load_statsbomb_data(matches_df, team_name, limit_matches=None, filter_team=T
             logger.warning("Empty matches dataframe provided.")
             return pd.DataFrame()
 
+        # Offline File Check
+        sanitized_team = team_name.replace(' ', '_')
+        save_file = os.path.join(config.DATA_DIR, f"{sanitized_team}_raw_events.csv")
+        if os.path.exists(save_file):
+            logger.info(f"Loaded Offline Component successfully for {team_name} from {save_file}")
+            df_cache = pd.read_csv(save_file)
+            
+            # Optionally restrict matches based on the exact match limits given to functionally bound it
+            if limit_matches:
+                match_ids_to_keep = matches_df.head(limit_matches)['match_id'].tolist()
+                df_cache = df_cache[df_cache['match_id'].isin(match_ids_to_keep)]
+            else:
+                match_ids_to_keep = matches_df['match_id'].tolist()
+                df_cache = df_cache[df_cache['match_id'].isin(match_ids_to_keep)]
+                
+            return df_cache
+
         # Fetch Events (Limit matches for speed)
         all_events = []
         matches_to_process = matches_df.head(limit_matches) if limit_matches else matches_df

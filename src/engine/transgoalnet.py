@@ -23,7 +23,7 @@ class GraphTransformerLayer(nn.Module):
         
         self.ffn = nn.Sequential(
             nn.Linear(hidden_dim, hidden_dim * 2),
-            nn.ReLU(),
+            nn.LeakyReLU(),
             nn.Linear(hidden_dim * 2, hidden_dim)
         )
         
@@ -98,14 +98,26 @@ class TransGoalNet(nn.Module):
         
         return y_hat, x
 
-def prepare_transgoalnet_dataset(actions_df, basic_xt_model, k_window=5):
+def prepare_transgoalnet_dataset(actions_df, basic_xt_model, k_window=5, force_recalc=False):
     """ Builds Graph nodes and edges for batches using sliding temporal window. """
+    import pickle
+    import os
+    import config
+    
+    cache_path = os.path.join(config.DATA_DIR, f"tgn_graphs_k{k_window}_{len(actions_df)}.pkl")
+    if not force_recalc and os.path.exists(cache_path):
+        print(f"Loading TransGoalNet graphs from cache: {cache_path}")
+        with open(cache_path, 'rb') as f:
+            return pickle.load(f)
+            
     actions_df = actions_df.copy()
     if 'xT' not in actions_df.columns:
         actions_df['xT'] = basic_xt_model.rate(actions_df).fillna(0.0)
     
     # Needs chronological sort for sliding window
-    if 'timestamp' in actions_df.columns:
+    if 'timestamp' in actions_df.columns and 'period' in actions_df.columns:
+        actions_df = actions_df.sort_values(['match_id', 'period', 'timestamp'])
+    elif 'timestamp' in actions_df.columns:
         actions_df = actions_df.sort_values(['match_id', 'timestamp'])
     
     graphs = []
@@ -260,6 +272,13 @@ def prepare_transgoalnet_dataset(actions_df, basic_xt_model, k_window=5):
                 'idx_to_player': {idx_val: p_name for p_name, idx_val in player_to_idx.items()}
             })
             
+    try:
+        with open(cache_path, 'wb') as f:
+            pickle.dump((graphs, MAX_N), f)
+        print(f"Saved TransGoalNet training graphs to cache: {cache_path}")
+    except Exception as e:
+        print(f"Warning: Failed to save graphs to cache: {e}")
+        
     return graphs, MAX_N
 
 def train_transgoalnet(graphs, max_n, epochs=15, batch_size=64, lr=1e-3, device='cuda'):
@@ -285,7 +304,9 @@ def train_transgoalnet(graphs, max_n, epochs=15, batch_size=64, lr=1e-3, device=
     patience_limit = 5
     
     train_history = {"epochs": [], "loss": [], "lr": []}
-    log_path = os.path.join(config.LOGS_DIR, "tgn_training_log.json")
+    from datetime import datetime
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    log_path = os.path.join(config.LOGS_DIR, f"tgn_training_log_{timestamp}.json")
     os.makedirs(config.LOGS_DIR, exist_ok=True)
     
     model.train()
@@ -329,7 +350,7 @@ def train_transgoalnet(graphs, max_n, epochs=15, batch_size=64, lr=1e-3, device=
             break
             
         # Periodic Checkpointing
-        if ep + 1 > 15 and (ep + 1) % 5 == 0:
+        if (ep + 1) % 5 == 0:
             import os
             from datetime import datetime
             ckpt_dir = os.path.join(config.ASSETS_DIR, 'tgn_checkpoints')
@@ -351,7 +372,11 @@ def apply_transgoalnet_inference(df, basic_xt_model, model_checkpoint_path):
         num_layers=config.TGN_NUM_LAYERS
     )
     # Load to CPU first to prevent CUDA out-of-memory or threading crashes in Streamlit
-    model.load_state_dict(torch.load(model_checkpoint_path, map_location='cpu'))
+    checkpoint = torch.load(model_checkpoint_path, map_location='cpu')
+    if isinstance(checkpoint, dict) and 'model_state_dict' in checkpoint:
+        model.load_state_dict(checkpoint['model_state_dict'])
+    else:
+        model.load_state_dict(checkpoint)
     model.to(device)
     model.eval()
     
@@ -430,7 +455,11 @@ def evaluate_transgoalnet(df, basic_xt_model, model_checkpoint_path):
         num_layers=config.TGN_NUM_LAYERS
     )
     # Load to CPU first to prevent CUDA out-of-memory or threading crashes in Streamlit
-    model.load_state_dict(torch.load(model_checkpoint_path, map_location='cpu'))
+    checkpoint = torch.load(model_checkpoint_path, map_location='cpu')
+    if isinstance(checkpoint, dict) and 'model_state_dict' in checkpoint:
+        model.load_state_dict(checkpoint['model_state_dict'])
+    else:
+        model.load_state_dict(checkpoint)
     model.to(device)
     model.eval()
     

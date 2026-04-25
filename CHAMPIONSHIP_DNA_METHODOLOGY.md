@@ -1,9 +1,9 @@
 # Championship DNA Comparison Methodology
 
-This document outlines the mathematical logic utilized to calculate the **Championship DNA Index (CDI)**, a unified ranking system designed to compare top team tactical identities against their actual on-field success (Winning/Losing ratios) within a specific championship season.
+This document outlines the mathematical logic utilized to calculate the **Tactical Evaluation Score (TES)**, a unified ranking system designed to quantify and rank top team tactical identities and structural dominance within a specific championship season.
 
 ## 1. Core Objectives
-The primary goal of the Championship DNA comparison is to evaluate if playing an aesthetically and structurally dominant style of football ("good DNA") functionally translates to winning games. We merge advanced network metrics (Expected Threat, passing coherence) with classic match outcome statistics.
+The primary goal of the Championship DNA comparison is to evaluate fundamentally robust tactical profiles by scoring teams on metrics like Expected Threat, passing coherence, vertical transition ability, expected goals (xG), and possession retention.
 
 ## 2. Passing Network Graph Construction & Metrics
 
@@ -34,67 +34,69 @@ $$ Cohesion_{team} = \frac{1}{|V|} \sum_{v \in V} C(v) $$
 Higher generalized cohesion represents strong, systemic short-range support structures universally embedded regardless of position.
 
 ## 3. Match Results & Win/Loss Ratios
-For a selected team in a specific competition and season, their success is evaluated purely on their points trajectory.
+While the TES operates independently of points entirely to act as an objective indicator of *how* a team plays, we still log their points trajectory to compare tactical identity against actual point accumulation:
 Assuming a team plays $N$ matches, having $W$ wins, $D$ draws, and $L$ losses:
-
 - **Win Ratio ($W_R$)**: $\displaystyle W_R = \frac{W}{N}$
 - **Loss Ratio ($L_R$)**: $\displaystyle L_R = \frac{L}{N}$
 - **Win-Loss Spread ($S_{WL}$)**: $\displaystyle S_{WL} = W_R - L_R$
 
-The Win-Loss Spread naturally penalizes teams that lose frequently and rewards consistent winners, bound roughly between $[-1, 1]$. In practical terms, to avoid negative indices, we normalize $S_{WL}$ across the championship to a $0 \rightarrow 1$ scale:
-
-$$ \hat{S}_{WL} = \frac{S_{WL} - \min(S_{WL})}{\max(S_{WL}) - \min(S_{WL})} $$
-
 ## 4. Tactical Efficacy Score (TES)
-The Tactical Efficacy Score represents a single numerical value outlining how "dominant" a team's passing network is. It aggregates our standard "Team DNA" metrics: `avg_cohesion`, `avg_xt`, `avg_trans_xt`, and `avg_centralization`.
+The Tactical Efficacy Score represents a single numerical value (0 to 1) outlining how "dominant" a team's playing style is. It aggregates our advanced "Team DNA" multi-dimensional network space into a single metric.
 
 Before aggregation, each metric $M$ for every team is min-max normalized ($M_{norm}$) compared to the rest of the teams in the *same* championship:
 
 $$ M_{norm_{i}} = \frac{M_i - \min(M_{all})}{\max(M_{all}) - \min(M_{all})} $$
 
-### Components of the TES:
-1. **Cohesion ($Coh$)**: Higher is better (dense triangle passing loops). Weight $w_1 = 0.25$.
-2. **Delta xT per Match ($TxT$)**: TransGoalNet Expected Threat generated per match. Weight $w_2 = 0.35$.
-3. **Basic xT per Match ($BxT$)**: Baseline positional expected threat per match. Weight $w_3 = 0.20$.
-4. **Decentralization ($Dec$)**: $1 - \text{Centralization}_{norm}$. We reward teams whose network load is distributed across the pitch rather than relying on a single playmaker. Weight $w_4 = 0.20$.
+### Components of the TES (8 Dimensions):
+1. **Cohesion ($Coh$)**: Higher is better (dense triangle passing loops).
+2. **Delta xT per Match ($TxT$)**: TransGoalNet Expected Threat generated per match.
+3. **Basic xT per Match ($BxT$)**: Baseline positional expected threat per match.
+4. **Decentralization ($Dec$)**: Calculated as $1 - \text{Centralization}_{norm}$. Rewards distributed network architectures rather than single playmakers.
+5. **Expected Goals - xG ($xG$)**: Direct volume of traditional Expected Goals.
+6. **Passing Accuracy ($PAcc$)**: Ratio of completed passes to intended passes.
+7. **Retention Ability ($Ret$)**: The structural stability under possession sequences (Calculated via passes/duration per possession period).
+8. **Verticality / Itrans ($ITr$)**: Transition efficiency modifier identifying quickly evolving threat, calculated as $\displaystyle I_{Trans} = \frac{\sum TransGoal\ xT}{Total\ Possession\ Duration}$.
 
 **TES Calculation:**
 
-$$ TES = (w_1 \times \overline{Coh}) + (w_2 \times \overline{TxT}) + (w_3 \times \overline{BxT}) + (w_4 \times \overline{Dec}) $$
+$$ TES = (w_1 \overline{Coh}) + (w_2 \overline{TxT}) + (w_3 \overline{BxT}) + (w_4 \overline{Dec}) + (w_5 \overline{xG}) + (w_6 \overline{PAcc}) + (w_7 \overline{Ret}) + (w_8 \overline{ITr}) $$
 
-Currently, the default heuristic weights are distributed as:
-- $w_1 = 0.25$, $w_2 = 0.35$, $w_3 = 0.20$, $w_4 = 0.20$
+Currently, the default heuristic weights assign an even 12.5% distribution across all 8 factors if MLR is deactivated:
+- $w_1 = w_2 = w_3 = w_4 = w_5 = w_6 = w_7 = w_8 = 0.125$
 
-*Note: The TES naturally scales from $0 \rightarrow 1$ assuming optimal components. An average team will sit around $0.4 - 0.6$.*
+*Note: For the Leaderboard display, TES is multiplied by 100 to yield a 1-100 scale.*
 
-## 4.1. Advanced TES Weighting Metrics (Mathematical Optimization)
-While heuristic (expert-assigned) components offer baseline accuracy, findings natively suggest that the exact relationship governing elite play varies across competitions. To optimize the TES calculation without subjective bias, our framework dynamically applies robust statistical modeling natively within the metric algorithms.
+### Optimization Engine 1: Hybrid PCA-MLR
+To solve the "Collinearity Problem" where tactical features are naturally correlated (e.g., high Cohesion often correlates with high Retention), we implement a **Hybrid PCA-MLR** approach.
+1.  **Dimensionality Reduction (PCA):** We extract the first 3-4 Principal Components (orthogonal axes) that capture >80% of the tactical variance across all teams.
+2.  **Orthogonal Regression:** We run an Ordinary Least Squares (OLS) regression using these uncorrelated PCs as inputs against the team Win Ratio.
+3.  **Weight Back-Projection:** The resulting coefficients are projected back onto the original 8-dimensional space to derive stable, non-redundant feature importance weights.
 
-### Implemented: Multiple Linear Regression (MLR)
-The precise influence of each tactical parameter is mapped directly to actual $Win\_Ratio$ through an enforced-positive Ordinary Least Squares regression executed via Scikit-Learn. The application UI allows users to directly push a button to train an MLR model targeting the specific season (or an aggregated all-time history) live.
-- **Target Variable (`y`)**: Actual Championship Win Ratio ($W_R$)
-- **Input Features (`X`)**: Normalized parameter tensor $\rightarrow [Coh_{norm}, TxT_{norm}, BxT_{norm}, Dec_{norm}]$
+### Optimization Engine 2: XGBoost & SHAP (Non-Linear)
+For complex tactical landscapes where relationships are non-linear, we utilize an **XGBRegressor** (Gradient Boosting).
+1.  **Non-Linear Modeling:** Captures decision-tree based relationships between metrics (e.g., Verticality is only positive if Passing Accuracy stays above a certain threshold).
+2.  **SHAP (SHapley Additive exPlanations):** Instead of raw coefficients, we calculate the global average impact (mean absolute SHAP) of every feature on the model's predictions. These SHAP values determine the relative weights in the TES equation, ensuring the ranking is driven by actual predictive contribution.
 
-The isolated, normalized coefficients ($\beta_1, \beta_2, \beta_3, \beta_4$) extracted from the converged linear equation seamlessly translate into perfectly optimal, data-driven model structural weights ($w_1, w_2, w_3, w_4$) that perfectly represent that specific league's tactical meta. These exact floats are generated, securely cached to the local file system (`tes_mlr_weights.json`), and automatically parsed on render to construct the dynamic Championship Leaderboards.
+## 4.2. Global Optimization & Validation
+To establish a "Universal Tactical Benchmark," the framework supports **Global All-Time Optimization**. 
+- **Cross-Competition Training:** The models aggregate match data across all available leagues and seasons (post a user-defined year threshold) to find universal "Winning DNA" traits.
+- **Model Validation:** 
+    - **80/20 Train/Test Split:** Models are trained on a subset of the global data and validated against held-out matches to ensure generalization.
+    - **Early Stopping:** XGBoost training utilizes a validation set with a patience of 10 rounds to prevent "memorization" of specific team names and ensure tactical metrics are the primary drivers.
+    - **R² Scoring:** The dashboard explicitly reports the $R^2$ coefficient of determination for both sets to monitor model health.
 
-*(Note: In the isolated event where the MLR strictly converges onto negative correlations—mathematically invalidating the construct integrity of an additive score where zero represents absolute failure—the algorithm safely catches this and gracefully regresses to the generalized heuristic weights defined above).*
+## 4.3. Unified Weight Pipeline
+All optimized weights are serialized to a centralized `assets/` directory (`tes_pca_weights.json`, `tes_xgboost_weights.json`). The dashboard implements a **Hierarchical Fallback Mapping**:
+1.  **Season-Specific Weights** (if trained)
+2.  **League All-Time Weights** (if trained)
+3.  **Global Historical Weights** (Master Fallback)
 
-### Future Enhancement: Principal Component Analysis (PCA)
-If teams exhibit heavily correlated behaviors (e.g., high $Coh$ almost always results in high $BxT$), calculating the Eigen-Vectors across the DNA Dataset will produce the "Principal Axis of Play" describing the ultimate variance in structural identity. Weighting metrics by their percentage contribution to $PC1$ constructs a fully data-driven equation for absolute network efficiency.
+This ensures that the "Global" model provides a robust analytical baseline even for competitions with limited data.
 
-## 5. Championship DNA Index (CDI)
-The ultimate ranking metric merges tactical dominance with pure winning effectiveness. 
-
-$$ CDI = (TES \times \hat{S}_{WL}) \cdot 100 $$
-
-### Interpretation of CDI
-- **High CDI (>75)**: "The Blueprint". A team that combines dominant, expansive football (High TES) with ruthless efficiency in gathering points (High Spread). e.g., Championship-winning teams.
-- **Moderate CDI (40-75)**: Good tactical blueprint but potentially lacking conversion into points, or an ugly-but-effective counter-attacking team that gathers points despite low passing network dominance.
-- **Low CDI (<40)**: Structurally disjointed teams suffering on both tactical output and match outcomes.
-
-## 6. Algorithmic Workflow
-1. Fetch all match-level data for all teams in the chosen Competition & Season using `statsbombpy`.
-2. Extract the Win/Loss results per team to calculate Spread ($S_{WL}$).
-3. Load previously cached DNA Profiles (`dna_profile.json`) or rapidly compute passing metrics via grouped arrays to evaluate $TES$.
-4. Z-Score or Min-Max normalize both $S_{WL}$ and the DNA traits.
-5. Compute the final **CDI** and rank teams descending to build the Leaderboard.
+## 5. Algorithmic Workflow
+1. **Offline-First Data Resolution:** Check for local `{Team}_raw_events.csv` to bypass API latency. If missing, fetch match-level data via `statsbombpy` and cache locally.
+2. **Global Result Aggregation:** Calculate Win/Loss ratios and Win-Loss spreads across the defined temporal window (e.g., matches since 2015).
+3. **Multi-League DNA Retrieval:** Recursively load or compute DNA profiles across all relevant competitions to build the high-dimensional feature matrix.
+4. **TES Model Inference:** Apply the chosen optimization engine (PCA-MLR or XGBoost) using weights loaded from the centralized `assets/` pipeline.
+5. **Contextual Normalization:** Z-Score or Min-Max normalize the 8 DNA traits across the active dataset.
+6. **Ranking:** Compute final **TES** and generate dynamic leaderboard visualizations.

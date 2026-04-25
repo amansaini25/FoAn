@@ -48,8 +48,11 @@ def prepare_xt_data(raw_df):
             result = 'success' if row.get('shot_outcome') == 'Goal' else 'fail'
             actions.append({
                 'match_id': row.get('match_id', None),
+                'period': row.get('period', 1),
                 'minute': row.get('minute', 0),
                 'second': row.get('second', 0),
+                'timestamp': row.get('timestamp', None),
+                'team': row.get('team', 'Unknown'),
                 'player_name': row.get('player_name', 'Unknown'),
                 'type': 'shot',
                 'result': result,
@@ -62,8 +65,11 @@ def prepare_xt_data(raw_df):
                 result = 'fail' if pd.notna(row.get('pass_outcome')) else 'success'
                 actions.append({
                     'match_id': row.get('match_id', None),
+                    'period': row.get('period', 1),
                     'minute': row.get('minute', 0),
                     'second': row.get('second', 0),
+                    'timestamp': row.get('timestamp', None),
+                    'team': row.get('team', 'Unknown'),
                     'player_name': row.get('player_name', 'Unknown'),
                     'type': 'move',
                     'result': result,
@@ -76,8 +82,11 @@ def prepare_xt_data(raw_df):
                 # Carries are generally successful moves
                 actions.append({
                     'match_id': row.get('match_id', None),
+                    'period': row.get('period', 1),
                     'minute': row.get('minute', 0),
                     'second': row.get('second', 0),
+                    'timestamp': row.get('timestamp', None),
+                    'team': row.get('team', 'Unknown'),
                     'player_name': row.get('player_name', 'Unknown'),
                     'type': 'move',
                     'result': 'success',

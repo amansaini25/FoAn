@@ -108,20 +108,25 @@ def plot_dna_radar(dna_metrics, save_path=None, cdi=None):
     if not dna_metrics:
         return
         
-    categories = ['Pass Vol', 'Centralization', 'Active Conns', 'Triadic Cohesion', 'xT', 'Delta xT']
+    categories = ['Decentralization', 'Cohesion', 'Basic xT', 'ITrans', 'xG', 'Pass Accuracy', 'Retention', 'Trans xT']
     
-    # Extract values
+    # Extract values. Decentralization here is simplified as 1 - centralization.
+    cent = dna_metrics.get('avg_centralization', 0.0)
+    decent = 1.0 - cent if cent < 1.0 else 0.0
+    
     raw_values = [
-        dna_metrics.get('avg_pass_volume', 0.0),
-        dna_metrics.get('avg_centralization', 0.0),
-        dna_metrics.get('avg_active_connections', 0.0),
+        decent,
         dna_metrics.get('avg_cohesion', 0.0),
         dna_metrics.get('avg_xt', 0.0),
-        dna_metrics.get('delta_xt', 0.0)
+        dna_metrics.get('avg_itrans', 0.0),
+        dna_metrics.get('avg_xg', 0.0),
+        dna_metrics.get('avg_pass_acc', 0.0),
+        dna_metrics.get('avg_retention', 0.0),
+        dna_metrics.get('avg_trans_xt', 0.0)
     ]
     
     # Cap values for normalization (empirical maximums to scale the polygon)
-    max_vals = [1000, 0.2, 350, 0.2, 2.0, 1.0]
+    max_vals = [1.0, 0.2, 2.0, 0.002, 3.0, 1.0, 20.0, 1.0]
     
     # Normalize values between 0 and 1
     values = [max(0.01, min(v / m, 1.0)) for v, m in zip(raw_values, max_vals)]
@@ -166,12 +171,12 @@ def plot_dna_radar(dna_metrics, save_path=None, cdi=None):
             
         ax.text(angle, 1.30, val_text, size=9, color='#00ff85', ha=ha, va='center', weight='bold')
         
-    # Plot CDI Ring if provided
+    # Display CDI or TES Ring if provided (now expected as TES)
     if cdi is not None:
-        norm_cdi = max(0.01, min(cdi / 100.0, 1.0))
+        norm_tes = max(0.01, min(cdi / 100.0, 1.0))
         circle_angles = np.linspace(0, 2 * np.pi, 100)
-        ax.plot(circle_angles, [norm_cdi]*100, color='gold', linestyle='--', linewidth=2, alpha=0.8, zorder=2)
-        ax.text(np.pi/4, norm_cdi + 0.08, f"CDI: {cdi:.2f}", color='gold', size=10, weight='bold', ha='center', va='center', zorder=5)
+        ax.plot(circle_angles, [norm_tes]*100, color='gold', linestyle='--', linewidth=2, alpha=0.8, zorder=2)
+        ax.text(np.pi/4, norm_tes + 0.08, f"TES: {cdi:.2f}", color='gold', size=10, weight='bold', ha='center', va='center', zorder=5)
         
     fig.tight_layout()
     
@@ -244,22 +249,22 @@ def plot_championship_leaderboard(leaderboard_df):
         st.warning("No data available to build the leaderboard.")
         return
         
-    st.markdown("This leaderboard ranks teams based on their **Championship DNA Index (CDI)**, which merges their functional on-field point-gathering (Win/Loss Spread) with tactical dominance (Team DNA Metrics).")
+    st.markdown("This leaderboard ranks teams based on their **Tactical Evaluation Score (TES)**, which quantifies tactical dominance (Team DNA Metrics) independently from results.")
     
     # Format the dataframe for display
     display_df = leaderboard_df.copy()
     
     # Sort
-    display_df = display_df.sort_values(by='CDI', ascending=False).reset_index(drop=True)
+    display_df = display_df.sort_values(by='TES', ascending=False).reset_index(drop=True)
     display_df.index += 1 # 1-indexed ranks
     
     # Keep specific columns
-    cols_to_show = ['Team', 'Matches', 'Win_Ratio', 'Loss_Ratio', 'CDI', 'TES']
+    cols_to_show = ['Team', 'Matches', 'Win_Ratio', 'Loss_Ratio', 'TES']
     if 'Seasons_Saved' in display_df.columns:
         cols_to_show.insert(2, 'Seasons_Saved')
         
     if 'Cohesion' in display_df.columns:
-        cols_to_show.extend(['Cohesion', 'Trans_xT', 'Basic_xT', 'Centralization'])
+        cols_to_show.extend(['Cohesion', 'Trans_xT', 'Basic_xT', 'Centralization', 'xG', 'Pass_Acc', 'Retention', 'ITrans'])
         
     display_df = display_df[cols_to_show]
     
@@ -267,24 +272,24 @@ def plot_championship_leaderboard(leaderboard_df):
     format_dict = {
         'Win_Ratio': '{:.2%}',
         'Loss_Ratio': '{:.2%}',
-        'CDI': '{:.1f}',
         'TES': '{:.3f}',
         'Cohesion': '{:.3f}',
         'Trans_xT': '{:.3f}',
         'Basic_xT': '{:.3f}',
-        'Centralization': '{:.3f}'
+        'Centralization': '{:.3f}',
+        'xG': '{:.2f}',
+        'Pass_Acc': '{:.2%}',
+        'Retention': '{:.1f}',
+        'ITrans': '{:.4f}'
     }
     
     # Apply styling
     styled_df = display_df.style.format(format_dict).background_gradient(
-        subset=['CDI'], cmap='YlGn'
+        subset=['TES'], cmap='YlGn'
     ).background_gradient(
         subset=['Win_Ratio'], cmap='Greens'
     ).background_gradient(
         subset=['Loss_Ratio'], cmap='Reds'
     )
     
-    if 'TES' in display_df.columns:
-        styled_df = styled_df.background_gradient(subset=['TES'], cmap='Blues')
-        
     st.dataframe(styled_df, use_container_width=True, height=600)
