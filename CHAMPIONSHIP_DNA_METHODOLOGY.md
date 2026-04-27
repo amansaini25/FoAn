@@ -8,8 +8,8 @@ The primary goal of the Championship DNA comparison is to evaluate fundamentally
 ## 2. Passing Network Graph Construction & Metrics
 
 All tactical identity structures are modeled using directed, weighted graphs derived directly from raw event data. 
-Let the passing network be represented as a directed graph $G = (V, E)$, where:
-- $V$ is the set of all unique players (nodes) who participated in a match.
+Let the passing network be represented as a directed graph $$G = (V, E)$$, where:
+- $$V$$ is the set of all unique players (nodes) who participated in a match.
 - $E$ is the set of directed passing interactions (edges) between players.
 - $w_{ij}$ represents the weight of the directed edge from player $i$ to player $j$, denoting the total volume of successful passes completed between them.
 
@@ -17,20 +17,24 @@ From this base graph structure, we extract several core structural attributes:
 
 ### Active Connected Volume (Passing Volume)
 Passing volume signifies a team's sheer possession control and connective activity. It is mathematically the total sum of edge weights in the directed graph network:
-$$ Volume = \sum_{i \in V} \sum_{j \in V} w_{ij} $$
+$$\text{Volume} = \sum_{i \in V} \sum_{j \in V} w_{ij}$$
 
 ### Betweenness Centralization
-Centralization measures the structural reliance a team places on specific individual "playmakers". We compute this by first calculating the Betweenness Centrality ($C_B(v)$) for every node, which quantifies the fraction of shortest paths that pass through that node.
-Let $\sigma_{st}$ be the total number of shortest paths from node $s$ to node $t$, and $\sigma_{st}(v)$ be the number of those paths passing through $v$:
-$$ C_B(v) = \sum_{s \neq v \neq t \in V} \frac{\sigma_{st}(v)}{\sigma_{st}} $$
+Centralization measures the structural reliance a team places on specific individual "playmakers". We compute this by first calculating the Betweenness Centrality ($$C_B(v)$$) for every node, which quantifies the fraction of shortest paths that pass through that node.
+Let $\sigma_{st}$ be the total number of shortest paths from node $s$ to node $t$, and $\sigma_{st}(v)$ be the number of those paths passing through 
+
+$$C_B(v) = \sum_{s \neq v \neq t \in V} \frac{\sigma_{st}(v)}{\sigma_{st}}$$
 
 Team Centralization is then calculated as the standard deviation ($\sigma$) of the betweenness centralities across all players in the network. A high Centralization indicates extreme reliance on a few star nodes, while low centralization dictates a decentralized, balanced passing architecture.
-$$ Centralization_{team} = \sqrt{\frac{1}{|V|} \sum_{v \in V} (C_B(v) - \mu_{C_B})^2}  $$
+
+$$\text{Centralization}_{\text{team}} = \sqrt{\frac{1}{|V|} \sum_{v \in V} \left( C_B(v) - \mu_{C_B} \right)^2}$$
 
 ### Triadic Cohesion (Clustering)
-Triadic cohesion quantifies the localized structural density of the team—essentially, how effectively localized clusters of players pass the ball dynamically in triangles to support one another.
-This is implemented by extracting the weighted clustering coefficient ($C(v)$) for every node. The team's overall Cohesion is the mean of these clustering values:
+Triadic cohesion quantifies the localized structural density of the team essentially, how effectively localized clusters of players pass the ball dynamically in triangles to support one another.
+This is implemented by extracting the weighted clustering coefficient ($$C(v)$$) for every node. The team's overall Cohesion is the mean of these clustering values:
+
 $$ Cohesion_{team} = \frac{1}{|V|} \sum_{v \in V} C(v) $$
+
 Higher generalized cohesion represents strong, systemic short-range support structures universally embedded regardless of position.
 
 ## 3. Match Results & Win/Loss Ratios
@@ -39,6 +43,10 @@ Assuming a team plays $N$ matches, having $W$ wins, $D$ draws, and $L$ losses:
 - **Win Ratio ($W_R$)**: $\displaystyle W_R = \frac{W}{N}$
 - **Loss Ratio ($L_R$)**: $\displaystyle L_R = \frac{L}{N}$
 - **Win-Loss Spread ($S_{WL}$)**: $\displaystyle S_{WL} = W_R - L_R$
+
+The Win-Loss Spread naturally penalizes teams that lose frequently and rewards consistent winners, bound roughly between $[-1, 1]$. In practical terms, to avoid negative indices, we normalize $S_{WL}$ across the championship to a $$0 \rightarrow 1$$ scale:
+
+$$ \hat{S}_{WL} = \frac{S_{WL} - \min(S_{WL})}{\max(S_{WL}) - \min(S_{WL})} $$
 
 ## 4. Tactical Efficacy Score (TES)
 The Tactical Efficacy Score represents a single numerical value (0 to 1) outlining how "dominant" a team's playing style is. It aggregates our advanced "Team DNA" multi-dimensional network space into a single metric.
@@ -64,7 +72,7 @@ $$ TES = (w_1 \overline{Coh}) + (w_2 \overline{TxT}) + (w_3 \overline{BxT}) + (w
 Currently, the default heuristic weights assign an even 12.5% distribution across all 8 factors if MLR is deactivated:
 - $w_1 = w_2 = w_3 = w_4 = w_5 = w_6 = w_7 = w_8 = 0.125$
 
-*Note: For the Leaderboard display, TES is multiplied by 100 to yield a 1-100 scale.*
+*Note: The TES naturally scales from $0 \rightarrow 1$ assuming optimal components. An average team will sit around $0.4 - 0.6$.*
 
 ### Optimization Engine 1: Hybrid PCA-MLR
 To solve the "Collinearity Problem" where tactical features are naturally correlated (e.g., high Cohesion often correlates with high Retention), we implement a **Hybrid PCA-MLR** approach.
