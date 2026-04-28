@@ -3,6 +3,7 @@ import matplotlib.pyplot as plt
 from mplsoccer import Pitch, VerticalPitch
 import pandas as pd
 import numpy as np
+import scipy.stats
 
 def plot_passing_network(filtered_df, min_pass_count):
     """Plots the directed passing network."""
@@ -103,33 +104,59 @@ def plot_xt_grid(xt_model):
     plt.colorbar(im, ax=ax, fraction=0.046, pad=0.04, label="Expected Threat (xT)")
     st.pyplot(fig)
 
-def plot_dna_radar(dna_metrics, save_path=None, cdi=None):
+def plot_dna_radar(dna_metrics, save_path=None, cdi=None, leaderboard_df=None):
     """Plots a normalized Radar Chart for Team DNA."""
     if not dna_metrics:
         return
         
-    categories = ['Decentralization', 'Cohesion', 'Basic xT', 'ITrans', 'xG', 'Pass Accuracy', 'Retention', 'Trans xT']
+    categories = ['Cohesion', 'Decentralization', 'Retention', 'Pass Accuracy', 'xG', 'ITrans', 'Basic xT', 'TransxT']
     
-    # Extract values. Decentralization here is simplified as 1 - centralization.
-    cent = dna_metrics.get('avg_centralization', 0.0)
-    decent = 1.0 - cent if cent < 1.0 else 0.0
+    metric_mapping = {
+        'Cohesion': ('avg_cohesion', 'Cohesion'),
+        'Decentralization': ('avg_centralization', 'Centralization'), 
+        'Retention': ('avg_retention', 'Retention'),
+        'Pass Accuracy': ('avg_pass_acc', 'Pass_Acc'),
+        'xG': ('avg_xg', 'xG'),
+        'ITrans': ('avg_itrans', 'ITrans'),
+        'Basic xT': ('avg_xt', 'Basic_xT'),
+        'TransxT': ('avg_trans_xt', 'Trans_xT')
+    }
     
-    raw_values = [
-        decent,
-        dna_metrics.get('avg_cohesion', 0.0),
-        dna_metrics.get('avg_xt', 0.0),
-        dna_metrics.get('avg_itrans', 0.0),
-        dna_metrics.get('avg_xg', 0.0),
-        dna_metrics.get('avg_pass_acc', 0.0),
-        dna_metrics.get('avg_retention', 0.0),
-        dna_metrics.get('avg_trans_xt', 0.0)
-    ]
+    def get_norm(team_metrics, metric_name):
+        dict_key, df_key = metric_mapping[metric_name]
+        val = team_metrics.get(dict_key, 0.0)
+        
+        if leaderboard_df is not None and not leaderboard_df.empty and df_key in leaderboard_df.columns:
+            league_vals = leaderboard_df[df_key].dropna()
+            if not league_vals.empty:
+                c_min = league_vals.min()
+                c_max = league_vals.max()
+                if c_max > c_min:
+                    if metric_name == 'Decentralization':
+                        return max(0.01, min(1.0 - ((val - c_min) / (c_max - c_min)), 1.0))
+                    else:
+                        return max(0.01, min((val - c_min) / (c_max - c_min), 1.0))
+                        
+        fallback_max = {
+            'Cohesion': 0.2, 'Decentralization': 1.0, 'Retention': 1.0, 
+            'Pass Accuracy': 1.0, 'xG': 3.0, 'ITrans': 0.02, 
+            'Basic xT': 2.0, 'TransxT': 15.0
+        }
+        max_val = fallback_max[metric_name]
+        if metric_name == 'Decentralization':
+            return max(0.01, min((1.0 - val) / max_val, 1.0)) if val < 1.0 else 0.01
+        return max(0.01, min(val / max_val, 1.0))
+
+    values = [get_norm(dna_metrics, cat) for cat in categories]
     
-    # Cap values for normalization (empirical maximums to scale the polygon)
-    max_vals = [1.0, 0.2, 2.0, 0.002, 3.0, 1.0, 20.0, 1.0]
-    
-    # Normalize values between 0 and 1
-    values = [max(0.01, min(v / m, 1.0)) for v, m in zip(raw_values, max_vals)]
+    raw_values = []
+    for cat in categories:
+        dict_key, _ = metric_mapping[cat]
+        val = dna_metrics.get(dict_key, 0.0)
+        if cat == 'Decentralization':
+            raw_values.append(1.0 - val if val < 1.0 else 0.0)
+        else:
+            raw_values.append(val)
     
     # Close the radar loop
     values += values[:1]
@@ -293,3 +320,104 @@ def plot_championship_leaderboard(leaderboard_df):
     )
     
     st.dataframe(styled_df, use_container_width=True, height=600)
+
+def plot_dual_dna_radar(team1_name, team1_metrics, team2_name, team2_metrics, leaderboard_df=None, tes1=None, tes2=None):
+    """Plots a dual-team tactical radar chart normalized by min-max from leaderboard."""
+    if not team1_metrics or not team2_metrics:
+        st.warning("Insufficient data to plot dual radar.")
+        return
+
+    # 8 Spikes
+    categories = ['Cohesion', 'Decentralization', 'Retention', 'Pass Accuracy', 'xG', 'ITrans', 'Basic xT', 'TransxT']
+    
+    # We need to map these to the keys in the metrics dict and leaderboard_df
+    metric_mapping = {
+        'Cohesion': ('avg_cohesion', 'Cohesion'),
+        'Decentralization': ('avg_centralization', 'Centralization'), # special handling
+        'Retention': ('avg_retention', 'Retention'),
+        'Pass Accuracy': ('avg_pass_acc', 'Pass_Acc'),
+        'xG': ('avg_xg', 'xG'),
+        'ITrans': ('avg_itrans', 'ITrans'),
+        'Basic xT': ('avg_xt', 'Basic_xT'),
+        'TransxT': ('avg_trans_xt', 'Trans_xT')
+    }
+    
+    def get_norm(team_metrics, metric_name):
+        dict_key, df_key = metric_mapping[metric_name]
+        val = team_metrics.get(dict_key, 0.0)
+        
+        if leaderboard_df is not None and not leaderboard_df.empty and df_key in leaderboard_df.columns:
+            league_vals = leaderboard_df[df_key].dropna()
+            if not league_vals.empty:
+                c_min = league_vals.min()
+                c_max = league_vals.max()
+                if c_max > c_min:
+                    if metric_name == 'Decentralization':
+                        return max(0.01, min(1.0 - ((val - c_min) / (c_max - c_min)), 1.0))
+                    else:
+                        return max(0.01, min((val - c_min) / (c_max - c_min), 1.0))
+                        
+        fallback_max = {
+            'Cohesion': 0.2, 'Decentralization': 1.0, 'Retention': 1.0, 
+            'Pass Accuracy': 1.0, 'xG': 3.0, 'ITrans': 0.02, 
+            'Basic xT': 2.0, 'TransxT': 15.0
+        }
+        max_val = fallback_max[metric_name]
+        if metric_name == 'Decentralization':
+            return max(0.01, min((1.0 - val) / max_val, 1.0)) if val < 1.0 else 0.01
+        return max(0.01, min(val / max_val, 1.0))
+
+    values1 = [get_norm(team1_metrics, cat) for cat in categories]
+    values2 = [get_norm(team2_metrics, cat) for cat in categories]
+
+    # Close the radar loop
+    values1 += values1[:1]
+    values2 += values2[:1]
+    angles = np.linspace(0, 2 * np.pi, len(categories), endpoint=False).tolist()
+    angles += angles[:1]
+    
+    fig, ax = plt.subplots(figsize=(8, 8), subplot_kw=dict(polar=True))
+    fig.patch.set_facecolor('none')
+    ax.set_facecolor('none')
+    
+    # Team 1 (Deep Blue)
+    color1 = '#1f77b4' # deep blue
+    ax.plot(angles, values1, color=color1, linewidth=2, label=team1_name, zorder=3)
+    ax.fill(angles, values1, color=color1, alpha=0.4, zorder=3)
+    
+    # Team 2 (Bright Orange)
+    color2 = '#ff7f0e' # bright orange
+    ax.plot(angles, values2, color=color2, linewidth=2, label=team2_name, zorder=4)
+    ax.fill(angles, values2, color=color2, alpha=0.4, zorder=4)
+    
+    # Set category labels
+    ax.set_xticks(angles[:-1])
+    # Sans-serif font
+    ax.set_xticklabels(categories, size=10, weight='bold', color='white', family='sans-serif')
+    ax.tick_params(axis='x', pad=30)
+    
+    # Formatting
+    ax.set_ylim(0, 1.0)
+    ax.set_yticks([0.25, 0.5, 0.75, 1.0])
+    ax.set_yticklabels(['25%', '50%', '75%', '100%'], color='#888888', size=8)
+    ax.spines['polar'].set_color('#555555')
+    ax.grid(color='#555555', linestyle='--', linewidth=0.5)
+    
+    # Legend
+    ax.legend(loc='upper right', bbox_to_anchor=(1.3, 1.1), facecolor='#1b1b1b', edgecolor='#555555', labelcolor='white', prop={'family': 'sans-serif', 'weight': 'bold', 'size': 10})
+    
+    # Display CDI or TES Rings if provided
+    circle_angles = np.linspace(0, 2 * np.pi, 100)
+    
+    if tes1 is not None:
+        norm_tes1 = max(0.01, min(tes1 / 100.0, 1.0))
+        ax.plot(circle_angles, [norm_tes1]*100, color=color1, linestyle='--', linewidth=2, alpha=0.8, zorder=2)
+        ax.text(np.pi/4, norm_tes1 + 0.05, f"TES(Blue): {tes1:.2f}", color='white', size=7, weight='bold', ha='center', va='center', zorder=5)
+        
+    if tes2 is not None:
+        norm_tes2 = max(0.01, min(tes2 / 100.0, 1.0))
+        ax.plot(circle_angles, [norm_tes2]*100, color=color2, linestyle='--', linewidth=2, alpha=0.8, zorder=2)
+        ax.text(3*np.pi/4, norm_tes2 + 0.05, f"TES(Orange)): {tes2:.2f}", color='white', size=7, weight='bold', ha='center', va='center', zorder=5)
+    
+    fig.tight_layout()
+    st.pyplot(fig, use_container_width=False)

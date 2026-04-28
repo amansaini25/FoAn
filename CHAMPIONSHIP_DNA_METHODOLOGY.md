@@ -9,7 +9,7 @@ The primary goal of the Championship DNA comparison is to evaluate fundamentally
 
 All tactical identity structures are modeled using directed, weighted graphs derived directly from raw event data. 
 Let the passing network be represented as a directed graph $$G = (V, E)$$, where:
-- $$V$$ is the set of all unique players (nodes) who participated in a match.
+- $V$ is the set of all unique players (nodes) who participated in a match.
 - $E$ is the set of directed passing interactions (edges) between players.
 - $w_{ij}$ represents the weight of the directed edge from player $i$ to player $j$, denoting the total volume of successful passes completed between them.
 
@@ -72,7 +72,7 @@ $$ TES = (w_1 \overline{Coh}) + (w_2 \overline{TxT}) + (w_3 \overline{BxT}) + (w
 Currently, the default heuristic weights assign an even 12.5% distribution across all 8 factors if MLR is deactivated:
 - $w_1 = w_2 = w_3 = w_4 = w_5 = w_6 = w_7 = w_8 = 0.125$
 
-*Note: The TES naturally scales from $0 \rightarrow 1$ assuming optimal components. An average team will sit around $0.4 - 0.6$.*
+Note: The TES naturally scales from $$0 \rightarrow 1$$ assuming optimal components. An average team will sit around $$0.4 - 0.6$$.
 
 ### Optimization Engine 1: Hybrid PCA-MLR
 To solve the "Collinearity Problem" where tactical features are naturally correlated (e.g., high Cohesion often correlates with high Retention), we implement a **Hybrid PCA-MLR** approach.

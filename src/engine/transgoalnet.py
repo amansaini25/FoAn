@@ -519,7 +519,7 @@ def evaluate_transgoalnet(df, basic_xt_model, model_checkpoint_path):
     # 3. Stability: Mean Absolute Change
     df_eval = df.copy()
     if 'Trans_xT' not in df_eval.columns:
-        df_eval = apply_transgoalnet_inference(df_eval, basic_xt_model, model_checkpoint_path)
+        df_eval, _ = apply_transgoalnet_inference(df_eval, basic_xt_model, model_checkpoint_path)
     
     mac = 0.0
     if len(df_eval) > 1 and 'Trans_xT' in df_eval.columns:

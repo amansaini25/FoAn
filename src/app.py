@@ -7,7 +7,10 @@ from engine.xt_model import apply_xt_to_passes, ExpectedThreat, prepare_xt_data
 from engine.transgoalnet import train_transgoalnet, prepare_transgoalnet_dataset, apply_transgoalnet_inference
 from engine.metrics import get_network_metrics, calculate_team_dna, calculate_championship_leaderboard, generate_and_save_comprehensive_dna
 from components.sidebar import render_data_selection, render_analysis_controls
-from components.visuals import plot_passing_network, plot_top_xt, plot_zone_activity, plot_threat_pulse, plot_xt_grid, plot_dna_radar, plot_tactical_heatmap, plot_championship_leaderboard
+from components.visuals import plot_passing_network, plot_top_xt, plot_zone_activity, plot_threat_pulse, plot_xt_grid, plot_dna_radar, plot_dual_dna_radar, plot_tactical_heatmap, plot_championship_leaderboard
+import importlib
+import components.visuals
+importlib.reload(components.visuals)
 from utils.logger import get_logger
 import config
 import os
@@ -238,6 +241,11 @@ if nav_mode == "Model Pipeline & Optimization":
     if st.sidebar.button("Optimize (All-Time)"):
         st.session_state['run_opt_all'] = True
         st.session_state['tes_year_threshold'] = tes_year_threshold
+        
+    st.sidebar.markdown("---")
+    st.sidebar.header("🏆 Championship Leaderboard")
+    if st.sidebar.button("Refresh Championship Leaderboard"):
+        st.session_state['refresh_champ_ldr'] = True
 
 # ==========================================
 # 3. DATA LOADING & PROCESSING
@@ -299,6 +307,23 @@ else:
             )
             torch.save(trans_model.state_dict(), trans_checkpoint_path)
             logger.info("TransGoalNet successfully trained and checkpoint saved.")
+
+    # Process Championship Leaderboard Refresh
+    if st.session_state.get('refresh_champ_ldr', False):
+        with st.spinner("Recompiling Championship Leaderboard..."):
+            from engine.metrics import calculate_all_time_leaderboard
+            from utils.data_loader import get_competitions, get_matches
+            calculate_all_time_leaderboard(selected_comp_name, comp_id, get_matches, get_competitions, config.DNA_DIR, config.LEADERBOARD_DIR, xt_model=xt_model, trans_checkpoint_path=trans_checkpoint_path, force_refresh=True)
+            st.session_state['refresh_champ_ldr'] = False
+            st.sidebar.success("Leaderboard Refreshed!")
+            
+    # Load global leaderboard for min-max normalization
+    safe_comp = selected_comp_name.replace("/", "_").replace(" ", "_")
+    global_ldr_path = os.path.join(config.DNA_DIR, safe_comp, "all_time_leaderboard.csv")
+    if os.path.exists(global_ldr_path):
+        comp_all_time_df = pd.read_csv(global_ldr_path)
+    else:
+        comp_all_time_df = pd.DataFrame()
 
     # Load data for dashboard visualization
     raw_df = load_statsbomb_data(team_matches, selected_team, limit_matches=None, filter_team=False)
@@ -427,30 +452,31 @@ elif nav_mode == "DNA Split Analysis" and team_matches is not None and not team_
                 w_coh, w_txt, w_bxt, w_dec, w_xg, w_pacc, w_ret, w_itr = get_tes_weights(weights_path)
             else:
                 w_coh, w_txt, w_bxt, w_dec, w_xg, w_pacc, w_ret, w_itr = 0.125, 0.125, 0.125, 0.125, 0.125, 0.125, 0.125, 0.125
+                
+            def calc_tes(subset_dict):
+                if not subset_dict or leaderboard_df.empty: return 0.0
+                
+                def get_norm(val, col):
+                    if col not in leaderboard_df.columns: return 0.5
+                    c_min = leaderboard_df[col].min()
+                    c_max = leaderboard_df[col].max()
+                    if c_max == c_min or pd.isna(c_max) or pd.isna(c_min): return 0.5
+                    return (val - c_min) / (c_max - c_min)
+                    
+                coh_norm = get_norm(subset_dict.get('avg_cohesion', 0), 'Cohesion')
+                txt_norm = get_norm(subset_dict.get('avg_trans_xt', 0), 'Trans_xT')
+                bxt_norm = get_norm(subset_dict.get('avg_xt', 0), 'Basic_xT')
+                dec_norm = 1.0 - get_norm(subset_dict.get('avg_centralization', 0), 'Centralization')
+                xg_norm = get_norm(subset_dict.get('avg_xg', 0), 'xG')
+                pacc_norm = get_norm(subset_dict.get('avg_pass_acc', 0), 'Pass_Acc')
+                ret_norm = get_norm(subset_dict.get('avg_retention', 0), 'Retention')
+                itr_norm = get_norm(subset_dict.get('avg_itrans', 0), 'ITrans')
+                
+                tes = (w_coh * coh_norm) + (w_txt * txt_norm) + (w_bxt * bxt_norm) + (w_dec * dec_norm) + (w_xg * xg_norm) + (w_pacc * pacc_norm) + (w_ret * ret_norm) + (w_itr * itr_norm)
+                return max(0.0, tes * 100) # Scale TES to 0-100 for display
             
             if not leaderboard_df.empty and len(leaderboard_df) > 1 and selected_team in leaderboard_df['Team'].values:
                 team_row = leaderboard_df[leaderboard_df['Team'] == selected_team].iloc[0]
-                
-                def calc_tes(subset_dict):
-                    if not subset_dict: return 0.0
-                    
-                    def get_norm(val, col):
-                        c_min = leaderboard_df[col].min()
-                        c_max = leaderboard_df[col].max()
-                        if c_max == c_min: return 0.5
-                        return (val - c_min) / (c_max - c_min)
-                        
-                    coh_norm = get_norm(subset_dict.get('avg_cohesion', 0), 'Cohesion')
-                    txt_norm = get_norm(subset_dict.get('avg_trans_xt', 0), 'Trans_xT')
-                    bxt_norm = get_norm(subset_dict.get('avg_xt', 0), 'Basic_xT')
-                    dec_norm = 1.0 - get_norm(subset_dict.get('avg_centralization', 0), 'Centralization')
-                    xg_norm = get_norm(subset_dict.get('avg_xg', 0), 'xG')
-                    pacc_norm = get_norm(subset_dict.get('avg_pass_acc', 0), 'Pass_Acc')
-                    ret_norm = get_norm(subset_dict.get('avg_retention', 0), 'Retention')
-                    itr_norm = get_norm(subset_dict.get('avg_itrans', 0), 'ITrans')
-                    
-                    tes = (w_coh * coh_norm) + (w_txt * txt_norm) + (w_bxt * bxt_norm) + (w_dec * dec_norm) + (w_xg * xg_norm) + (w_pacc * pacc_norm) + (w_ret * ret_norm) + (w_itr * itr_norm)
-                    return max(0.0, tes * 100) # Scale TES to 0-100 for display
                 
                 tes_overall = calc_tes(overall)
                 tes_win = calc_tes(win_stats)
@@ -461,28 +487,184 @@ elif nav_mode == "DNA Split Analysis" and team_matches is not None and not team_
                 with col1:
                     st.markdown(f"**🛡️ Historical (TES: {tes_overall:.2f})**")
                     if overall:
-                        plot_dna_radar(overall, cdi=tes_overall)
+                        plot_dna_radar(overall, cdi=tes_overall, leaderboard_df=leaderboard_df)
                     else: st.warning("No data")
                 with col2:
                     st.markdown(f"**🏆 Wins (TES: {tes_win:.2f})**")
                     if win_stats:
-                        plot_dna_radar(win_stats, cdi=tes_win)
+                        plot_dna_radar(win_stats, cdi=tes_win, leaderboard_df=leaderboard_df)
                     else: st.warning("No wins found")
                 with col3:
                     st.markdown(f"**⚠️ Losses (TES: {tes_loss:.2f})**")
                     if loss_stats:
-                        plot_dna_radar(loss_stats, cdi=tes_loss)
+                        plot_dna_radar(loss_stats, cdi=tes_loss, leaderboard_df=leaderboard_df)
                     else: st.warning("No losses found")
                 with col4:
                     st.markdown(f"**⚖️ Draws (TES: {tes_draw:.2f})**")
                     if draw_stats:
-                        plot_dna_radar(draw_stats, cdi=tes_draw)
+                        plot_dna_radar(draw_stats, cdi=tes_draw, leaderboard_df=leaderboard_df)
                     else: st.warning("No draws found")
             else:
                 st.warning("Could not contextualize TES against the leaderboard minimums and maximums.")
                 
         else:
             st.error("Team DNA profile not found. Please navigate to the Leaderboard to Batch Render team profiles.")
+
+        # --- DNA SIMILARITY MODULE ---
+        st.markdown("---")
+        st.subheader("🔍 DNA Similarity Comparison")
+        
+        with st.expander("📚 DNA Feature Definitions"):
+            st.markdown("""
+            - **Basic xT**: Traditional expected threat generated via passing.
+            - **Cohesion**: Network triadic cohesion (amount of local support triangles).
+            - **Decentralization**: Low dependency on individual star players for distribution (1 - Centralization from standard deviation).
+            - **TransxT**: Dynamic Expected Threat calculated over a sliding temporal window of actions using our Graph Transformer.
+            - **Retention**: Ability to keep possession without being dispossessed.
+            - **Pass Accuracy**: Ratio of successful passes to total passes.
+            - **xG**: Expected Goals generated via shots.
+            - **ITrans**: Inverse Transition phase threat; expected threat over possession duration.
+            """)
+
+        sim_mode = st.radio("Comparison Mode:", ["Team vs Team", "Historical vs Match"], horizontal=True)
+        
+        from scipy.spatial.distance import cosine
+        import numpy as np
+        
+        def extract_dna_vector(dna_metrics, ldf=None):
+            if not dna_metrics: return None
+            
+            def get_norm(val, col):
+                if ldf is None or ldf.empty or col not in ldf.columns:
+                    # Fallback to absolute max caps
+                    max_caps = {
+                        'Centralization': 1.0, 'Cohesion': 0.2, 'Basic_xT': 2.0, 
+                        'ITrans': 0.002, 'xG': 3.0, 'Pass_Acc': 1.0, 
+                        'Retention': 20.0, 'Trans_xT': 15.0
+                    }
+                    m = max_caps.get(col, 1.0)
+                    return max(0.01, min(val / m, 1.0))
+                
+                c_min = ldf[col].min()
+                c_max = ldf[col].max()
+                if c_max == c_min or pd.isna(c_max) or pd.isna(c_min): return 0.5
+                return (val - c_min) / (c_max - c_min)
+
+            cent = dna_metrics.get('avg_centralization', 0.0)
+            decent = 1.0 - get_norm(cent, 'Centralization')
+            
+            values = [
+                decent,
+                get_norm(dna_metrics.get('avg_cohesion', 0.0), 'Cohesion'),
+                get_norm(dna_metrics.get('avg_xt', 0.0), 'Basic_xT'),
+                get_norm(dna_metrics.get('avg_itrans', 0.0), 'ITrans'),
+                get_norm(dna_metrics.get('avg_xg', 0.0), 'xG'),
+                get_norm(dna_metrics.get('avg_pass_acc', 0.0), 'Pass_Acc'),
+                get_norm(dna_metrics.get('avg_retention', 0.0), 'Retention'),
+                get_norm(dna_metrics.get('avg_trans_xt', 0.0), 'Trans_xT')
+            ]
+            return np.array(values)
+            
+        _ldf = leaderboard_df if 'leaderboard_df' in locals() else None
+        vector_1 = extract_dna_vector(overall if 'overall' in locals() else None, _ldf)
+        
+        def display_dna_comparison_table(name1, dna1, name2, dna2):
+            if not dna1 or not dna2: return
+            categories = ['Cohesion', 'Decentralization', 'Retention', 'Pass Accuracy', 'xG', 'ITrans', 'Basic xT', 'TransxT']
+            
+            def extract_raw(dna):
+                return [
+                    dna.get('avg_cohesion', 0.0),
+                    1.0 - dna.get('avg_centralization', 1.0) if dna.get('avg_centralization', 1.0) < 1.0 else 0.0,
+                    dna.get('avg_retention', 0.0),
+                    dna.get('avg_pass_acc', 0.0),
+                    dna.get('avg_xg', 0.0),
+                    dna.get('avg_itrans', 0.0),
+                    dna.get('avg_xt', 0.0),
+                    dna.get('avg_trans_xt', 0.0)
+                ]
+            
+            df = pd.DataFrame({
+                'Metric': categories,
+                name1: extract_raw(dna1),
+                name2: extract_raw(dna2)
+            })
+            
+            # Difference column
+            df['Difference'] = df[name1] - df[name2]
+            
+            format_dict = {
+                name1: '{:.3f}',
+                name2: '{:.3f}',
+                'Difference': '{:+.3f}'
+            }
+            
+            def highlight_diff(val):
+                if pd.isna(val): return ''
+                color = '#00ff85' if val > 0 else '#ff4b4b' if val < 0 else 'white'
+                return f'color: {color}'
+                
+            st.markdown("### Numerical Comparison")
+            st.dataframe(df.style.format(format_dict).map(highlight_diff, subset=['Difference']), use_container_width=True)
+        
+        if sim_mode == "Team vs Team":
+            teams = pd.concat([all_matches['home_team'], all_matches['away_team']]).unique() if all_matches is not None else []
+            teams = sorted([t for t in teams if t != selected_team])
+            if teams:
+                target_team = st.selectbox("Select Target Team", teams)
+                safe_target = target_team.replace("/", "_").replace(" ", "_")
+                target_profile_path = os.path.join(config.DNA_DIR, safe_comp, safe_season, safe_target, "dna_profile.json")
+                
+                if os.path.exists(target_profile_path):
+                    with open(target_profile_path, "r") as f:
+                        target_data = json.load(f)
+                    target_overall = target_data.get("overall", {})
+                    vector_2 = extract_dna_vector(target_overall, _ldf)
+                    
+                    if vector_1 is not None and vector_2 is not None:
+                        sim = 1 - cosine(vector_1, vector_2)
+                        st.metric(f"Cosine Similarity ({selected_team} vs {target_team})", f"{sim*100:.2f}%")
+                        
+                        st.markdown("### Tactical Radar Comparison")
+                        tes1 = calc_tes(overall) if 'calc_tes' in locals() else None
+                        tes2 = calc_tes(target_overall) if 'calc_tes' in locals() else None
+                        plot_dual_dna_radar(selected_team, overall, target_team, target_overall, leaderboard_df=_ldf, tes1=tes1, tes2=tes2)
+                        display_dna_comparison_table(selected_team, overall, target_team, target_overall)
+                    else:
+                        st.warning("Could not extract feature vectors.")
+                else:
+                    st.warning(f"DNA profile not found for {target_team}. Please batch render team profiles on the Leaderboard tab.")
+            else:
+                st.info("No other teams available for comparison.")
+                
+        elif sim_mode == "Historical vs Match":
+            if team_matches is not None and not team_matches.empty:
+                matches_list = team_matches.copy()
+                matches_list['Match_Label'] = matches_list['home_team'] + " vs " + matches_list['away_team'] + " (" + matches_list['match_date'].astype(str) + ")"
+                match_id = st.selectbox("Select Match", matches_list['match_id'].tolist(), format_func=lambda x: matches_list[matches_list['match_id'] == x]['Match_Label'].iloc[0])
+                
+                if st.button("Calculate Match Similarity"):
+                    with st.spinner("Extracting Match DNA..."):
+                        if match_id:
+                            m_raw = raw_df[(raw_df['match_id'] == match_id) & (raw_df['team'] == selected_team)]
+                            m_pass = pass_df[pass_df['match_id'] == match_id]
+                            from engine.metrics import calculate_team_dna
+                            match_dna = calculate_team_dna(m_pass, m_raw)
+                            vector_2 = extract_dna_vector(match_dna, _ldf)
+                            
+                            if vector_1 is not None and vector_2 is not None:
+                                sim = 1 - cosine(vector_1, vector_2)
+                                st.metric(f"Cosine Similarity (Historical vs Selected Match)", f"{sim*100:.2f}%")
+                                
+                                st.markdown("### Tactical Radar Comparison")
+                                tes1 = calc_tes(overall) if 'calc_tes' in locals() else None
+                                tes2 = calc_tes(match_dna) if 'calc_tes' in locals() else None
+                                plot_dual_dna_radar(f"{selected_team} (Historical)", overall, "Match DNA", match_dna, leaderboard_df=_ldf, tes1=tes1, tes2=tes2)
+                                display_dna_comparison_table(f"{selected_team} (Historical)", overall, "Match DNA", match_dna)
+                            else:
+                                st.warning("Could not calculate match vectors.")
+            else:
+                st.info("No matches available.")
 
 elif nav_mode == "Visual Analytics" and team_matches is not None and not team_matches.empty:
     # ==========================================
@@ -502,7 +684,7 @@ elif nav_mode == "Visual Analytics" and team_matches is not None and not team_ma
             
             col_r1, col_r2, col_r3 = st.columns([1, 2, 1])
             with col_r2:
-                plot_dna_radar(overall_dna_metrics)
+                plot_dna_radar(overall_dna_metrics, leaderboard_df=comp_all_time_df)
 
             # --- ROW 1: NETWORK HEALTH METRICS ---
             st.markdown("---")
@@ -645,7 +827,7 @@ elif nav_mode == "Visual Analytics" and team_matches is not None and not team_ma
             else:
                 st.info("No matches available to compute the season leaderboard.")
         else:
-            st.info(f"The All-Time Leaderboard aggregates historical match results and DNA profiles globally across **all available competitions and seasons**.")
+            st.info(f"The All-Time Leaderboard aggregates historical match results and DNA profiles globally across **all available seasons for {selected_comp_name}**.")
             if st.button("Load / Generate All-Time Leaderboard"):
                 # Set a session state flag so that the dataframe persists explicitly without hiding when re-rendering components
                 st.session_state['show_all_time'] = True
@@ -657,8 +839,8 @@ elif nav_mode == "Visual Analytics" and team_matches is not None and not team_ma
                     
                     year_thresh = st.session_state.get('tes_year_threshold', 2015)
                     leaderboard_df = calculate_all_time_leaderboard(
-                        "Global", 
-                        None, 
+                        selected_comp_name, 
+                        comp_id, 
                         get_matches, 
                         get_competitions,
                         config.DNA_DIR, 

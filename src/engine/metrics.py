@@ -151,7 +151,10 @@ def generate_and_save_comprehensive_dna(pass_df, team_matches, selected_team, se
     # Add time_bin
     bins = [0, 15, 30, 45, 60, 75, 90, 120]
     labels = ['0-15', '15-30', '30-45', '45-60', '60-75', '75-90', '90+']
-    comp_df['time_bin'] = pd.cut(comp_df['minute'], bins=bins, labels=labels, right=False)
+    if not comp_df.empty and 'minute' in comp_df.columns:
+        comp_df['time_bin'] = pd.cut(comp_df['minute'], bins=bins, labels=labels, right=False)
+    else:
+        comp_df['time_bin'] = 'Unknown'
     
     # Add venue mapping
     if 'match_id' in comp_df.columns and team_matches is not None and not team_matches.empty:
@@ -170,10 +173,11 @@ def generate_and_save_comprehensive_dna(pass_df, team_matches, selected_team, se
             dna_comprehensive["by_outcome"][str(outcome)] = calculate_team_dna(comp_df[comp_df['outcome_result'] == outcome], raw_df)
             
     dna_comprehensive["by_time_phase"] = {}
-    for phase in labels:
-        phase_df = comp_df[comp_df['time_bin'] == phase]
-        if not phase_df.empty:
-            dna_comprehensive["by_time_phase"][str(phase)] = calculate_team_dna(phase_df, raw_df)
+    if 'time_bin' in comp_df.columns and not comp_df.empty:
+        for phase in labels:
+            phase_df = comp_df[comp_df['time_bin'] == phase]
+            if not phase_df.empty:
+                dna_comprehensive["by_time_phase"][str(phase)] = calculate_team_dna(phase_df, raw_df)
             
     dna_comprehensive["by_venue"] = {}
     for venue in ['Home', 'Away']:
@@ -597,7 +601,7 @@ def calculate_championship_leaderboard(matches_df, comp_name, season_name, dna_d
     
     return merged_df
 
-def calculate_all_time_leaderboard(comp_name, comp_id, get_matches_func, get_competitions_func, dna_dir, save_dir, xt_model=None, trans_checkpoint_path=None, year_threshold=None, engine_type='Hybrid PCA-MLR'):
+def calculate_all_time_leaderboard(comp_name, comp_id, get_matches_func, get_competitions_func, dna_dir, save_dir, xt_model=None, trans_checkpoint_path=None, year_threshold=None, engine_type='Hybrid PCA-MLR', force_refresh=False):
     """
     Calculates the 'All-Time' Championship DNA Leaderboard for a selected competition.
     It aggregates all available matches and DNA profiles across all seasons.
@@ -611,11 +615,16 @@ def calculate_all_time_leaderboard(comp_name, comp_id, get_matches_func, get_com
     from engine.transgoalnet import apply_transgoalnet_inference
     
     safe_comp = comp_name.replace("/", "_").replace(" ", "_")
+    
+    # Save inside dna_dir / safe_comp
+    comp_dna_dir = os.path.join(dna_dir, safe_comp)
+    os.makedirs(comp_dna_dir, exist_ok=True)
+    
     thresh_str = f"_since_{year_threshold}" if year_threshold is not None else ""
-    save_path = os.path.join(save_dir, f"{safe_comp}_all_seasons{thresh_str}.csv")
+    save_path = os.path.join(comp_dna_dir, f"all_time_leaderboard{thresh_str}.csv")
     
     # Check cache
-    if os.path.exists(save_path):
+    if not force_refresh and os.path.exists(save_path):
         return pd.read_csv(save_path)
         
     comps = get_competitions_func()
@@ -735,8 +744,7 @@ def calculate_all_time_leaderboard(comp_name, comp_id, get_matches_func, get_com
                         except Exception:
                             pass
                             
-                    # Since this aggregates multiple seasons, generate it using the target comp & first detected mismatching season (or aggregate format).
-                    # Actually, if we just want it to save, we use the first available season from their matches for structure:
+                    # Use the first available season from their matches for structure:
                     t_season = team_matches['season'].iloc[0] if 'season' in team_matches.columns else "Unknown_Season"
                     dna_comprehensive = generate_and_save_comprehensive_dna(pass_df, team_matches, team, comp_name, t_season, dna_dir, my_team_df)
                     
