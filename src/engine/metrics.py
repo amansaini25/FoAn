@@ -15,6 +15,7 @@ def get_network_metrics(data):
         if row['player_name'] != row['pass_recipient_name']:
             G.add_edge(row['player_name'], row['pass_recipient_name'], weight=row['weight'])
     
+    
     if len(G) == 0: return 0, 0, 0
     
     # Metrics
@@ -24,6 +25,107 @@ def get_network_metrics(data):
     coh = np.mean(list(clus.values())) # Cohesion
     
     return cent, coh, len(G.edges)
+
+def calculate_dsi(match_events, team_name):
+    """
+    Calculates Defensive Suppression Index (DSI) and High-Efficiency Suppression (HES)
+    for a given team based on StatsBomb match events.
+    """
+    if match_events.empty:
+        return 0.0, 0.0
+        
+    opp_events = match_events[match_events['team'] != team_name].copy()
+    our_events = match_events[match_events['team'] == team_name].copy()
+    
+    if opp_events.empty:
+        return 0.0, 0.0
+        
+    # Handle NaN in under_pressure
+    if 'under_pressure' in opp_events.columns:
+        opp_events['under_pressure'] = opp_events['under_pressure'].fillna(False)
+    else:
+        opp_events['under_pressure'] = False
+        
+    opp_passes = opp_events[opp_events['type'] == 'Pass'].copy()
+    total_opp_passes = len(opp_passes)
+    
+    if total_opp_passes == 0:
+        return 0.0, 0.0
+        
+    def get_spatial_weight(x, y):
+        if pd.isna(x) or pd.isna(y): return 1.0
+        # Golden Zone: box (x>=102, 18<=y<=62) and Zone 14 (80<=x<=102, 30<=y<=50)
+        in_box = (x >= 102) and (18 <= y <= 62)
+        in_zone14 = (80 <= x <= 102) and (30 <= y <= 50)
+        if in_box or in_zone14:
+            return 1.5
+        return 1.0
+        
+    # Calculate DSI
+    opp_passes['pressure_weight'] = opp_passes.apply(
+        lambda row: get_spatial_weight(row.get('location_0', row.get('x')), row.get('location_1', row.get('y'))) 
+        if row['under_pressure'] else 0.0, axis=1
+    )
+    
+    opp_passes_under_pressure_weighted = opp_passes['pressure_weight'].sum()
+    
+    if 'pass_outcome' in opp_passes.columns:
+        completed_passes = opp_passes[opp_passes['pass_outcome'].isnull()]
+    else:
+        completed_passes = opp_passes
+        
+    completion_rate = len(completed_passes) / total_opp_passes
+    
+    dsi = (opp_passes_under_pressure_weighted / total_opp_passes) * (1 - completion_rate)
+    
+    # Calculate High-Efficiency Suppression (HES)
+    hes = 0.0
+    if not our_events.empty:
+        pressures = our_events[our_events['type'] == 'Pressure']
+        recoveries = our_events[our_events['type'].isin(['Ball Recovery', 'Interception'])]
+        
+        for _, p_row in pressures.iterrows():
+            p_time = p_row.get('minute', 0) * 60 + p_row.get('second', 0)
+            p_period = p_row.get('period', 1)
+            
+            # Find recoveries within 3 seconds
+            recs = recoveries[(recoveries['period'] == p_period) & 
+                              ((recoveries['minute'] * 60 + recoveries['second']) >= p_time) & 
+                              ((recoveries['minute'] * 60 + recoveries['second']) <= p_time + 3)]
+            if not recs.empty:
+                hes += 1.0
+                
+    return float(dsi), float(hes)
+
+def get_penalized_opponent_network(m_raw_opp, dsi):
+    """
+    Builds the opponent network and applies 'Friction' based on DSI to penalize centrality.
+    """
+    if m_raw_opp.empty: return 0.0
+    opp_passes = m_raw_opp[m_raw_opp['type'] == 'Pass'].copy()
+    if 'pass_outcome' in opp_passes.columns:
+        opp_success = opp_passes[opp_passes['pass_outcome'].isnull()]
+    else:
+        opp_success = opp_passes
+        
+    G = nx.DiGraph()
+    if opp_success.empty: return 0.0
+    
+    # raw events have 'player' and 'pass_recipient' instead of 'player_name'
+    if 'player' not in opp_success.columns or 'pass_recipient' not in opp_success.columns:
+        return 0.0
+        
+    pass_counts = opp_success.groupby(['player', 'pass_recipient']).size().reset_index(name='weight')
+    friction_coefficient = max(0.01, 1.0 - dsi) # Higher DSI = More Friction
+    
+    for _, row in pass_counts.iterrows():
+        if row['player'] != row['pass_recipient']:
+            w = row['weight'] * friction_coefficient
+            G.add_edge(row['player'], row['pass_recipient'], weight=w)
+            
+    if len(G) == 0: return 0.0
+    bet = nx.betweenness_centrality(G, weight='weight')
+    return np.std(list(bet.values()))
 
 def calculate_team_dna(df, raw_df=None):
     """
@@ -47,6 +149,9 @@ def calculate_team_dna(df, raw_df=None):
     pass_accs = []
     retentions = []
     itrans_list = []
+    dsis = []
+    hes_list = []
+    opp_cents = []
     
     for match_id in match_ids:
         # If 'match_id' isn't in df, just use the whole df
@@ -84,11 +189,30 @@ def calculate_team_dna(df, raw_df=None):
             m_poss_duration = m_raw['duration'].sum() if 'duration' in m_raw.columns else 0.0
             itrans = m_trans_xt / m_poss_duration if m_poss_duration > 0 else 0.0
             itrans_list.append(itrans)
+            
+            # Calculate DSI, HES, and Penalized Opponent Centrality
+            selected_team = df['team'].iloc[0] if 'team' in df.columns else None
+            if selected_team:
+                m_dsi, m_hes = calculate_dsi(m_raw, selected_team)
+                dsis.append(m_dsi)
+                hes_list.append(m_hes)
+                
+                m_raw_opp = m_raw[m_raw['team'] != selected_team]
+                opp_penalized_cent = get_penalized_opponent_network(m_raw_opp, m_dsi)
+                opp_cents.append(opp_penalized_cent)
+            else:
+                dsis.append(0.0)
+                hes_list.append(0.0)
+                opp_cents.append(0.0)
+                
         else:
             xgs.append(0.0)
             pass_accs.append(0.0)
             retentions.append(0.0)
             itrans_list.append(0.0)
+            dsis.append(0.0)
+            hes_list.append(0.0)
+            opp_cents.append(0.0)
         
     avg_volume = np.mean(volumes) if volumes else 0.0
     avg_cent = np.mean(centralizations) if centralizations else 0.0
@@ -101,6 +225,10 @@ def calculate_team_dna(df, raw_df=None):
     avg_pass_acc = np.mean(pass_accs) if pass_accs else 0.0
     avg_retention = np.mean(retentions) if retentions else 0.0
     avg_itrans = np.mean(itrans_list) if itrans_list else 0.0
+    
+    avg_dsi = np.mean(dsis) if dsis else 0.0
+    avg_hes = np.mean(hes_list) if hes_list else 0.0
+    avg_opp_cent = np.mean(opp_cents) if opp_cents else 0.0
     
     xt_per_pass = avg_xt / avg_volume if avg_volume > 0 else 0.0
     trans_xt_per_pass = avg_trans_xt / avg_volume if avg_volume > 0 else 0.0
@@ -131,6 +259,9 @@ def calculate_team_dna(df, raw_df=None):
         "avg_pass_acc": float(avg_pass_acc),
         "avg_retention": float(avg_retention),
         "avg_itrans": float(avg_itrans),
+        "avg_dsi": float(avg_dsi),
+        "avg_hes": float(avg_hes),
+        "avg_opp_cent_penalized": float(avg_opp_cent),
         "top_threat_creators": top_creators,
         "top_trans_threat_creators": top_trans_creators
     }
@@ -290,7 +421,7 @@ def train_tes_pca_weights(leaderboard_df, save_path):
     if len(train_df) < 5:
         raise ValueError("Not enough teams with DNA profiles to train PCA reliably.")
         
-    features = ['Coh_Norm', 'TxT_Norm', 'BxT_Norm', 'Dec_Norm', 'xG_Norm', 'PAcc_Norm', 'Ret_Norm', 'ITr_Norm']
+    features = ['Coh_Norm', 'TxT_Norm', 'BxT_Norm', 'Dec_Norm', 'xG_Norm', 'PAcc_Norm', 'Ret_Norm', 'ITr_Norm', 'DSI_Norm', 'HES_Norm']
     
     for f in features:
         if f not in train_df.columns:
@@ -332,6 +463,8 @@ def train_tes_pca_weights(leaderboard_df, save_path):
         'w_pacc': float(w_norm[5]),
         'w_ret': float(w_norm[6]),
         'w_itr': float(w_norm[7]),
+        'w_dsi': float(w_norm[8]),
+        'w_hes': float(w_norm[9]),
         'cumulative_variance': cumulative_variance,
         'n_components': n_components,
         'r2_score': r2_score
@@ -358,7 +491,7 @@ def train_tes_xgboost_weights(leaderboard_df, save_path, xgb_model_path):
     if len(train_df) < 5:
         raise ValueError("Not enough teams with DNA profiles to train XGBoost reliably.")
         
-    features = ['Coh_Norm', 'TxT_Norm', 'BxT_Norm', 'Dec_Norm', 'xG_Norm', 'PAcc_Norm', 'Ret_Norm', 'ITr_Norm']
+    features = ['Coh_Norm', 'TxT_Norm', 'BxT_Norm', 'Dec_Norm', 'xG_Norm', 'PAcc_Norm', 'Ret_Norm', 'ITr_Norm', 'DSI_Norm', 'HES_Norm']
     
     for f in features:
         if f not in train_df.columns:
@@ -432,12 +565,12 @@ def get_tes_weights(save_path):
                 w = json.load(f)
                 return (
                     w.get('w_coh', 0.125), w.get('w_txt', 0.125), w.get('w_bxt', 0.125),
-                    w.get('w_dec', 0.125), w.get('w_xg', 0.125), w.get('w_pacc', 0.125),
-                    w.get('w_ret', 0.125), w.get('w_itr', 0.125)
+                    w.get('w_dec', 0.1), w.get('w_xg', 0.1), w.get('w_pacc', 0.1),
+                    w.get('w_ret', 0.1), w.get('w_itr', 0.1), w.get('w_dsi', 0.1), w.get('w_hes', 0.1)
                 )
         except Exception:
             pass
-    return 0.125, 0.125, 0.125, 0.125, 0.125, 0.125, 0.125, 0.125
+    return 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1
 
 def calculate_championship_leaderboard(matches_df, comp_name, season_name, dna_dir, xt_model=None, trans_checkpoint_path=None, engine_type='Hybrid PCA-MLR'):
     """
@@ -474,6 +607,8 @@ def calculate_championship_leaderboard(matches_df, comp_name, season_name, dna_d
         pacc = 0.0
         ret = 0.0
         itr = 0.0
+        dsi = 0.0
+        hes = 0.0
         has_dna = False
         
         if os.path.exists(profile_path):
@@ -491,6 +626,8 @@ def calculate_championship_leaderboard(matches_df, comp_name, season_name, dna_d
                         pacc = overall.get("avg_pass_acc", 0.0)
                         ret = overall.get("avg_retention", 0.0)
                         itr = overall.get("avg_itrans", 0.0)
+                        dsi = overall.get("avg_dsi", 0.0)
+                        hes = overall.get("avg_hes", 0.0)
             except Exception:
                 pass
                 
@@ -513,7 +650,7 @@ def calculate_championship_leaderboard(matches_df, comp_name, season_name, dna_d
                         except Exception:
                             pass
                         
-                    dna_comprehensive = generate_and_save_comprehensive_dna(pass_df, team_matches, team, comp_name, season_name, dna_dir, my_team_df)
+                    dna_comprehensive = generate_and_save_comprehensive_dna(pass_df, team_matches, team, comp_name, season_name, dna_dir, team_raw_df)
                     overall = dna_comprehensive.get("overall", {})
                     
                     has_dna = True
@@ -525,6 +662,8 @@ def calculate_championship_leaderboard(matches_df, comp_name, season_name, dna_d
                     pacc = overall.get("avg_pass_acc", 0.0)
                     ret = overall.get("avg_retention", 0.0)
                     itr = overall.get("avg_itrans", 0.0)
+                    dsi = overall.get("avg_dsi", 0.0)
+                    hes = overall.get("avg_hes", 0.0)
             except Exception:
                 pass
                 
@@ -538,7 +677,9 @@ def calculate_championship_leaderboard(matches_df, comp_name, season_name, dna_d
             'xG': xg,
             'Pass_Acc': pacc,
             'Retention': ret,
-            'ITrans': itr
+            'ITrans': itr,
+            'DSI': dsi,
+            'HES': hes
         })
         
     dna_df = pd.DataFrame(dna_records)
@@ -562,8 +703,10 @@ def calculate_championship_leaderboard(matches_df, comp_name, season_name, dna_d
         merged_df.loc[valid_dna.index, 'Dec_Norm'] = 1.0 - min_max('Centralization')
         merged_df.loc[valid_dna.index, 'xG_Norm'] = min_max('xG')
         merged_df.loc[valid_dna.index, 'PAcc_Norm'] = min_max('Pass_Acc')
-        merged_df.loc[valid_dna.index, 'Ret_Norm'] = 1.0 - min_max('Retention')
+        merged_df.loc[valid_dna.index, 'Ret_Norm'] = 1.0 - min_max('Retention') # Or regular if you want
         merged_df.loc[valid_dna.index, 'ITr_Norm'] = min_max('ITrans')
+        merged_df.loc[valid_dna.index, 'DSI_Norm'] = min_max('DSI')
+        merged_df.loc[valid_dna.index, 'HES_Norm'] = min_max('HES')
         
     else:
         merged_df['Coh_Norm'] = 0.5
@@ -574,6 +717,8 @@ def calculate_championship_leaderboard(matches_df, comp_name, season_name, dna_d
         merged_df['PAcc_Norm'] = 0.5
         merged_df['Ret_Norm'] = 0.5
         merged_df['ITr_Norm'] = 0.5
+        merged_df['DSI_Norm'] = 0.5
+        merged_df['HES_Norm'] = 0.5
         
     # Calculate TES
     import config
@@ -582,7 +727,7 @@ def calculate_championship_leaderboard(matches_df, comp_name, season_name, dna_d
         weights_path = os.path.join(config.ASSETS_DIR, "tes_pca_weights.json")
     else:
         weights_path = os.path.join(config.ASSETS_DIR, "tes_xgboost_weights.json")
-    w_coh, w_txt, w_bxt, w_dec, w_xg, w_pacc, w_ret, w_itr = get_tes_weights(weights_path)
+    w_coh, w_txt, w_bxt, w_dec, w_xg, w_pacc, w_ret, w_itr, w_dsi, w_hes = get_tes_weights(weights_path)
     
     merged_df['TES'] = (w_coh * merged_df['Coh_Norm']) + \
                        (w_txt * merged_df['TxT_Norm']) + \
@@ -591,7 +736,13 @@ def calculate_championship_leaderboard(matches_df, comp_name, season_name, dna_d
                        (w_xg * merged_df['xG_Norm']) + \
                        (w_pacc * merged_df['PAcc_Norm']) + \
                        (w_ret * merged_df['Ret_Norm']) + \
-                       (w_itr * merged_df['ITr_Norm'])
+                       (w_itr * merged_df['ITr_Norm']) + \
+                       (w_dsi * merged_df['DSI_Norm']) + \
+                       (w_hes * merged_df['HES_Norm'])
+                       
+    # Re-normalize TES if sum of weights changed
+    total_weights = w_coh + w_txt + w_bxt + w_dec + w_xg + w_pacc + w_ret + w_itr + w_dsi + w_hes
+    merged_df['TES'] = merged_df['TES'] / total_weights
                        
     # If a team has no DNA saved, set TES to 0
     merged_df.loc[merged_df['Has_DNA'] == False, 'TES'] = 0.0
@@ -694,7 +845,9 @@ def calculate_all_time_leaderboard(comp_name, comp_id, get_matches_func, get_com
                                 'xG': overall.get("avg_xg", 0.0),
                                 'Pass_Acc': overall.get("avg_pass_acc", 0.0),
                                 'Retention': overall.get("avg_retention", 0.0),
-                                'ITrans': overall.get("avg_itrans", 0.0)
+                                'ITrans': overall.get("avg_itrans", 0.0),
+                                'DSI': overall.get("avg_dsi", 0.0),
+                                'HES': overall.get("avg_hes", 0.0)
                             })
                 except Exception:
                     pass
@@ -712,6 +865,8 @@ def calculate_all_time_leaderboard(comp_name, comp_id, get_matches_func, get_com
             avg_pacc = np.mean([p['Pass_Acc'] for p in profiles])
             avg_ret = np.mean([p['Retention'] for p in profiles])
             avg_itr = np.mean([p['ITrans'] for p in profiles])
+            avg_dsi = np.mean([p['DSI'] for p in profiles])
+            avg_hes = np.mean([p['HES'] for p in profiles])
             final_dna_rows.append({
                 'Team': team,
                 'Has_DNA': True,
@@ -723,6 +878,8 @@ def calculate_all_time_leaderboard(comp_name, comp_id, get_matches_func, get_com
                 'Pass_Acc': avg_pacc,
                 'Retention': avg_ret,
                 'ITrans': avg_itr,
+                'DSI': avg_dsi,
+                'HES': avg_hes,
                 'Seasons_Saved': len(profiles)
             })
         else:
@@ -746,7 +903,7 @@ def calculate_all_time_leaderboard(comp_name, comp_id, get_matches_func, get_com
                             
                     # Use the first available season from their matches for structure:
                     t_season = team_matches['season'].iloc[0] if 'season' in team_matches.columns else "Unknown_Season"
-                    dna_comprehensive = generate_and_save_comprehensive_dna(pass_df, team_matches, team, comp_name, t_season, dna_dir, my_team_df)
+                    dna_comprehensive = generate_and_save_comprehensive_dna(pass_df, team_matches, team, comp_name, t_season, dna_dir, team_raw_df)
                     
                     overall = dna_comprehensive.get("overall", {})
                     
@@ -761,15 +918,17 @@ def calculate_all_time_leaderboard(comp_name, comp_id, get_matches_func, get_com
                         'Pass_Acc': overall.get("avg_pass_acc", 0.0),
                         'Retention': overall.get("avg_retention", 0.0),
                         'ITrans': overall.get("avg_itrans", 0.0),
+                        'DSI': overall.get("avg_dsi", 0.0),
+                        'HES': overall.get("avg_hes", 0.0),
                         'Seasons_Saved': 1
                     })
                 else:
                     final_dna_rows.append({
-                        'Team': team, 'Has_DNA': False, 'Cohesion': 0.0, 'Trans_xT': 0.0, 'Basic_xT': 0.0, 'Centralization': 0.0, 'xG': 0.0, 'Pass_Acc': 0.0, 'Retention': 0.0, 'ITrans': 0.0, 'Seasons_Saved': 0
+                        'Team': team, 'Has_DNA': False, 'Cohesion': 0.0, 'Trans_xT': 0.0, 'Basic_xT': 0.0, 'Centralization': 0.0, 'xG': 0.0, 'Pass_Acc': 0.0, 'Retention': 0.0, 'ITrans': 0.0, 'DSI': 0.0, 'HES': 0.0, 'Seasons_Saved': 0
                     })
             except Exception:
                 final_dna_rows.append({
-                    'Team': team, 'Has_DNA': False, 'Cohesion': 0.0, 'Trans_xT': 0.0, 'Basic_xT': 0.0, 'Centralization': 0.0, 'xG': 0.0, 'Pass_Acc': 0.0, 'Retention': 0.0, 'ITrans': 0.0, 'Seasons_Saved': 0
+                    'Team': team, 'Has_DNA': False, 'Cohesion': 0.0, 'Trans_xT': 0.0, 'Basic_xT': 0.0, 'Centralization': 0.0, 'xG': 0.0, 'Pass_Acc': 0.0, 'Retention': 0.0, 'ITrans': 0.0, 'DSI': 0.0, 'HES': 0.0, 'Seasons_Saved': 0
                 })
             
     dna_df = pd.DataFrame(final_dna_rows)
@@ -792,6 +951,8 @@ def calculate_all_time_leaderboard(comp_name, comp_id, get_matches_func, get_com
         merged_df.loc[valid_dna.index, 'PAcc_Norm'] = min_max('Pass_Acc')
         merged_df.loc[valid_dna.index, 'Ret_Norm'] = min_max('Retention')
         merged_df.loc[valid_dna.index, 'ITr_Norm'] = min_max('ITrans')
+        merged_df.loc[valid_dna.index, 'DSI_Norm'] = min_max('DSI')
+        merged_df.loc[valid_dna.index, 'HES_Norm'] = min_max('HES')
     else:
         merged_df['Coh_Norm'] = 0.5
         merged_df['TxT_Norm'] = 0.5
@@ -801,13 +962,15 @@ def calculate_all_time_leaderboard(comp_name, comp_id, get_matches_func, get_com
         merged_df['PAcc_Norm'] = 0.5
         merged_df['Ret_Norm'] = 0.5
         merged_df['ITr_Norm'] = 0.5
+        merged_df['DSI_Norm'] = 0.5
+        merged_df['HES_Norm'] = 0.5
         
     import config
     if engine_type == 'Hybrid PCA-MLR':
         weights_path = os.path.join(config.ASSETS_DIR, "tes_pca_weights.json")
     else:
         weights_path = os.path.join(config.ASSETS_DIR, "tes_xgboost_weights.json")
-    w_coh, w_txt, w_bxt, w_dec, w_xg, w_pacc, w_ret, w_itr = get_tes_weights(weights_path)
+    w_coh, w_txt, w_bxt, w_dec, w_xg, w_pacc, w_ret, w_itr, w_dsi, w_hes = get_tes_weights(weights_path)
 
     merged_df['TES'] = (w_coh * merged_df['Coh_Norm']) + \
                        (w_txt * merged_df['TxT_Norm']) + \
@@ -816,7 +979,12 @@ def calculate_all_time_leaderboard(comp_name, comp_id, get_matches_func, get_com
                        (w_xg * merged_df['xG_Norm']) + \
                        (w_pacc * merged_df['PAcc_Norm']) + \
                        (w_ret * merged_df['Ret_Norm']) + \
-                       (w_itr * merged_df['ITr_Norm'])
+                       (w_itr * merged_df['ITr_Norm']) + \
+                       (w_dsi * merged_df['DSI_Norm']) + \
+                       (w_hes * merged_df['HES_Norm'])
+                       
+    total_weights = w_coh + w_txt + w_bxt + w_dec + w_xg + w_pacc + w_ret + w_itr + w_dsi + w_hes
+    merged_df['TES'] = merged_df['TES'] / total_weights
                        
     merged_df.loc[merged_df['Has_DNA'] == False, 'TES'] = 0.0
     merged_df = merged_df.sort_values('TES', ascending=False).reset_index(drop=True)

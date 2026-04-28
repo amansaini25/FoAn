@@ -353,7 +353,7 @@ else:
         pass_df, top_lane = apply_transgoalnet_inference(pass_df, basic_xt_model=xt_model, model_checkpoint_path=trans_checkpoint_path)
         
     with st.spinner("Compiling and saving Team DNA Profile silently..."):
-        generate_and_save_comprehensive_dna(pass_df, team_matches, selected_team, selected_comp_name, selected_season_name, config.DNA_DIR, team_raw_df)
+        generate_and_save_comprehensive_dna(pass_df, team_matches, selected_team, selected_comp_name, selected_season_name, config.DNA_DIR, raw_df)
             
     logger.info("Data processing complete, rendering dashboard...")
 
@@ -449,9 +449,9 @@ elif nav_mode == "DNA Split Analysis" and team_matches is not None and not team_
             weights_path = os.path.join(config.ASSETS_DIR, f"{log_prefix}.json")
                 
             if os.path.exists(weights_path):
-                w_coh, w_txt, w_bxt, w_dec, w_xg, w_pacc, w_ret, w_itr = get_tes_weights(weights_path)
+                w_coh, w_txt, w_bxt, w_dec, w_xg, w_pacc, w_ret, w_itr, w_dsi, w_hes = get_tes_weights(weights_path)
             else:
-                w_coh, w_txt, w_bxt, w_dec, w_xg, w_pacc, w_ret, w_itr = 0.125, 0.125, 0.125, 0.125, 0.125, 0.125, 0.125, 0.125
+                w_coh, w_txt, w_bxt, w_dec, w_xg, w_pacc, w_ret, w_itr, w_dsi, w_hes = 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1
                 
             def calc_tes(subset_dict):
                 if not subset_dict or leaderboard_df.empty: return 0.0
@@ -471,9 +471,13 @@ elif nav_mode == "DNA Split Analysis" and team_matches is not None and not team_
                 pacc_norm = get_norm(subset_dict.get('avg_pass_acc', 0), 'Pass_Acc')
                 ret_norm = get_norm(subset_dict.get('avg_retention', 0), 'Retention')
                 itr_norm = get_norm(subset_dict.get('avg_itrans', 0), 'ITrans')
+                dsi_norm = get_norm(subset_dict.get('avg_dsi', 0), 'DSI')
+                hes_norm = get_norm(subset_dict.get('avg_hes', 0), 'HES')
                 
-                tes = (w_coh * coh_norm) + (w_txt * txt_norm) + (w_bxt * bxt_norm) + (w_dec * dec_norm) + (w_xg * xg_norm) + (w_pacc * pacc_norm) + (w_ret * ret_norm) + (w_itr * itr_norm)
-                return max(0.0, tes * 100) # Scale TES to 0-100 for display
+                tes = (w_coh * coh_norm) + (w_txt * txt_norm) + (w_bxt * bxt_norm) + (w_dec * dec_norm) + (w_xg * xg_norm) + (w_pacc * pacc_norm) + (w_ret * ret_norm) + (w_itr * itr_norm) + (w_dsi * dsi_norm) + (w_hes * hes_norm)
+                # Re-normalize just in case
+                total_w = w_coh + w_txt + w_bxt + w_dec + w_xg + w_pacc + w_ret + w_itr + w_dsi + w_hes
+                return max(0.0, (tes / total_w) * 100) # Scale TES to 0-100 for display
             
             if not leaderboard_df.empty and len(leaderboard_df) > 1 and selected_team in leaderboard_df['Team'].values:
                 team_row = leaderboard_df[leaderboard_df['Team'] == selected_team].iloc[0]
@@ -540,7 +544,7 @@ elif nav_mode == "DNA Split Analysis" and team_matches is not None and not team_
                     max_caps = {
                         'Centralization': 1.0, 'Cohesion': 0.2, 'Basic_xT': 2.0, 
                         'ITrans': 0.002, 'xG': 3.0, 'Pass_Acc': 1.0, 
-                        'Retention': 20.0, 'Trans_xT': 15.0
+                        'Retention': 20.0, 'Trans_xT': 15.0, 'DSI': 0.5, 'HES': 10.0
                     }
                     m = max_caps.get(col, 1.0)
                     return max(0.01, min(val / m, 1.0))
@@ -558,6 +562,8 @@ elif nav_mode == "DNA Split Analysis" and team_matches is not None and not team_
                 get_norm(dna_metrics.get('avg_cohesion', 0.0), 'Cohesion'),
                 get_norm(dna_metrics.get('avg_xt', 0.0), 'Basic_xT'),
                 get_norm(dna_metrics.get('avg_itrans', 0.0), 'ITrans'),
+                get_norm(dna_metrics.get('avg_dsi', 0.0), 'DSI'),
+                get_norm(dna_metrics.get('avg_hes', 0.0), 'HES'),
                 get_norm(dna_metrics.get('avg_xg', 0.0), 'xG'),
                 get_norm(dna_metrics.get('avg_pass_acc', 0.0), 'Pass_Acc'),
                 get_norm(dna_metrics.get('avg_retention', 0.0), 'Retention'),
@@ -570,7 +576,7 @@ elif nav_mode == "DNA Split Analysis" and team_matches is not None and not team_
         
         def display_dna_comparison_table(name1, dna1, name2, dna2):
             if not dna1 or not dna2: return
-            categories = ['Cohesion', 'Decentralization', 'Retention', 'Pass Accuracy', 'xG', 'ITrans', 'Basic xT', 'TransxT']
+            categories = ['Cohesion', 'Decentralization', 'Retention', 'Pass Accuracy', 'DSI', 'HES', 'xG', 'ITrans', 'Basic xT', 'TransxT']
             
             def extract_raw(dna):
                 return [
@@ -578,6 +584,8 @@ elif nav_mode == "DNA Split Analysis" and team_matches is not None and not team_
                     1.0 - dna.get('avg_centralization', 1.0) if dna.get('avg_centralization', 1.0) < 1.0 else 0.0,
                     dna.get('avg_retention', 0.0),
                     dna.get('avg_pass_acc', 0.0),
+                    dna.get('avg_dsi', 0.0),
+                    dna.get('avg_hes', 0.0),
                     dna.get('avg_xg', 0.0),
                     dna.get('avg_itrans', 0.0),
                     dna.get('avg_xt', 0.0),
@@ -646,7 +654,7 @@ elif nav_mode == "DNA Split Analysis" and team_matches is not None and not team_
                 if st.button("Calculate Match Similarity"):
                     with st.spinner("Extracting Match DNA..."):
                         if match_id:
-                            m_raw = raw_df[(raw_df['match_id'] == match_id) & (raw_df['team'] == selected_team)]
+                            m_raw = raw_df[(raw_df['match_id'] == match_id)]
                             m_pass = pass_df[pass_df['match_id'] == match_id]
                             from engine.metrics import calculate_team_dna
                             match_dna = calculate_team_dna(m_pass, m_raw)
@@ -680,7 +688,7 @@ elif nav_mode == "Visual Analytics" and team_matches is not None and not team_ma
             st.subheader("🧬 Team DNA Radar (Average Match Profile)")
             
             # Calculate DNA using the full pass_df (representing whole matches)
-            overall_dna_metrics = calculate_team_dna(pass_df, team_raw_df)
+            overall_dna_metrics = calculate_team_dna(pass_df, raw_df)
             
             col_r1, col_r2, col_r3 = st.columns([1, 2, 1])
             with col_r2:

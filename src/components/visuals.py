@@ -109,13 +109,15 @@ def plot_dna_radar(dna_metrics, save_path=None, cdi=None, leaderboard_df=None):
     if not dna_metrics:
         return
         
-    categories = ['Cohesion', 'Decentralization', 'Retention', 'Pass Accuracy', 'xG', 'ITrans', 'Basic xT', 'TransxT']
+    categories = ['Cohesion', 'Decentralization', 'Retention', 'Pass Accuracy', 'DSI', 'HES', 'xG', 'ITrans', 'Basic xT', 'TransxT']
     
     metric_mapping = {
         'Cohesion': ('avg_cohesion', 'Cohesion'),
         'Decentralization': ('avg_centralization', 'Centralization'), 
         'Retention': ('avg_retention', 'Retention'),
         'Pass Accuracy': ('avg_pass_acc', 'Pass_Acc'),
+        'DSI': ('avg_dsi', 'DSI'),
+        'HES': ('avg_hes', 'HES'),
         'xG': ('avg_xg', 'xG'),
         'ITrans': ('avg_itrans', 'ITrans'),
         'Basic xT': ('avg_xt', 'Basic_xT'),
@@ -139,7 +141,7 @@ def plot_dna_radar(dna_metrics, save_path=None, cdi=None, leaderboard_df=None):
                         
         fallback_max = {
             'Cohesion': 0.2, 'Decentralization': 1.0, 'Retention': 1.0, 
-            'Pass Accuracy': 1.0, 'xG': 3.0, 'ITrans': 0.02, 
+            'Pass Accuracy': 1.0, 'DSI': 0.5, 'HES': 10.0, 'xG': 3.0, 'ITrans': 0.02, 
             'Basic xT': 2.0, 'TransxT': 15.0
         }
         max_val = fallback_max[metric_name]
@@ -291,7 +293,7 @@ def plot_championship_leaderboard(leaderboard_df):
         cols_to_show.insert(2, 'Seasons_Saved')
         
     if 'Cohesion' in display_df.columns:
-        cols_to_show.extend(['Cohesion', 'Trans_xT', 'Basic_xT', 'Centralization', 'xG', 'Pass_Acc', 'Retention', 'ITrans'])
+        cols_to_show.extend(['Cohesion', 'Trans_xT', 'Basic_xT', 'Centralization', 'xG', 'Pass_Acc', 'Retention', 'DSI', 'HES', 'ITrans'])
         
     display_df = display_df[cols_to_show]
     
@@ -307,6 +309,8 @@ def plot_championship_leaderboard(leaderboard_df):
         'xG': '{:.2f}',
         'Pass_Acc': '{:.2%}',
         'Retention': '{:.1f}',
+        'DSI': '{:.3f}',
+        'HES': '{:.1f}',
         'ITrans': '{:.4f}'
     }
     
@@ -328,7 +332,7 @@ def plot_dual_dna_radar(team1_name, team1_metrics, team2_name, team2_metrics, le
         return
 
     # 8 Spikes
-    categories = ['Cohesion', 'Decentralization', 'Retention', 'Pass Accuracy', 'xG', 'ITrans', 'Basic xT', 'TransxT']
+    categories = ['Cohesion', 'Decentralization', 'Retention', 'Pass Accuracy', 'DSI', 'HES', 'xG', 'ITrans', 'Basic xT', 'TransxT']
     
     # We need to map these to the keys in the metrics dict and leaderboard_df
     metric_mapping = {
@@ -336,11 +340,14 @@ def plot_dual_dna_radar(team1_name, team1_metrics, team2_name, team2_metrics, le
         'Decentralization': ('avg_centralization', 'Centralization'), # special handling
         'Retention': ('avg_retention', 'Retention'),
         'Pass Accuracy': ('avg_pass_acc', 'Pass_Acc'),
+        'DSI': ('avg_dsi', 'DSI'),
+        'HES': ('avg_hes', 'HES'),
         'xG': ('avg_xg', 'xG'),
         'ITrans': ('avg_itrans', 'ITrans'),
         'Basic xT': ('avg_xt', 'Basic_xT'),
         'TransxT': ('avg_trans_xt', 'Trans_xT')
     }
+
     
     def get_norm(team_metrics, metric_name):
         dict_key, df_key = metric_mapping[metric_name]
@@ -357,11 +364,7 @@ def plot_dual_dna_radar(team1_name, team1_metrics, team2_name, team2_metrics, le
                     else:
                         return max(0.01, min((val - c_min) / (c_max - c_min), 1.0))
                         
-        fallback_max = {
-            'Cohesion': 0.2, 'Decentralization': 1.0, 'Retention': 1.0, 
-            'Pass Accuracy': 1.0, 'xG': 3.0, 'ITrans': 0.02, 
-            'Basic xT': 2.0, 'TransxT': 15.0
-        }
+        fallback_max = leaderboard_df.iloc[0].to_dict()
         max_val = fallback_max[metric_name]
         if metric_name == 'Decentralization':
             return max(0.01, min((1.0 - val) / max_val, 1.0)) if val < 1.0 else 0.01
