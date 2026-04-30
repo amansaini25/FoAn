@@ -172,26 +172,37 @@ def calculate_team_dna(df, raw_df=None):
         
         # New Metrics
         if m_raw is not None and not m_raw.empty:
-            m_xg = m_raw['shot_statsbomb_xg'].sum() if 'shot_statsbomb_xg' in m_raw.columns else 0.0
+            # Determine the selected team from the pass df for per-team scoping
+            selected_team = df['team'].iloc[0] if 'team' in df.columns else None
+            
+            # Scope raw events to the selected team for per-team metrics
+            # (full m_raw is still used for DSI/HES which needs opponent events)
+            m_team_raw = m_raw[m_raw['team'] == selected_team] if selected_team else m_raw
+            
+            # xG: only the selected team's shots
+            m_xg = m_team_raw['shot_statsbomb_xg'].sum() if 'shot_statsbomb_xg' in m_team_raw.columns else 0.0
             xgs.append(m_xg)
             
-            passes = m_raw[m_raw['type'] == 'Pass']
-            total_passes = len(passes)
-            # m_df only contains successful passes for this team
+            # Pass accuracy: team passes only
+            team_passes = m_team_raw[m_team_raw['type'] == 'Pass']
+            total_passes = len(team_passes)
+            # m_df contains successful passes (pass_outcome is null after preprocess)
             pass_acc = len(m_df) / total_passes if total_passes > 0 else 0.0
-            pass_accs.append(pass_acc)
+            pass_accs.append(min(pass_acc, 1.0))  # cap at 1.0 to prevent rounding errors
             
-            losses = len(passes[passes['pass_outcome'].notnull()]) + len(m_raw[m_raw['type'].isin(['Dispossessed', 'Miscontrol'])])
-            m_poss_count = m_raw['possession'].nunique() if 'possession' in m_raw.columns else 1.0
-            retention = losses / m_poss_count if m_poss_count > 0 else 0.0
+            # Retention: team's own losses / team's possession sequences
+            team_failed_passes = len(team_passes[team_passes['pass_outcome'].notnull()]) if 'pass_outcome' in team_passes.columns else 0
+            team_losses = team_failed_passes + len(m_team_raw[m_team_raw['type'].isin(['Dispossessed', 'Miscontrol'])])
+            m_poss_count = m_team_raw['possession'].nunique() if 'possession' in m_team_raw.columns else 1.0
+            retention = team_losses / m_poss_count if m_poss_count > 0 else 0.0
             retentions.append(retention)
             
-            m_poss_duration = m_raw['duration'].sum() if 'duration' in m_raw.columns else 0.0
+            # ITrans: Trans_xT per second of possession duration (team only)
+            m_poss_duration = m_team_raw['duration'].sum() if 'duration' in m_team_raw.columns else 0.0
             itrans = m_trans_xt / m_poss_duration if m_poss_duration > 0 else 0.0
             itrans_list.append(itrans)
             
-            # Calculate DSI, HES, and Penalized Opponent Centrality
-            selected_team = df['team'].iloc[0] if 'team' in df.columns else None
+            # DSI and HES use FULL m_raw (opponent events needed)
             if selected_team:
                 m_dsi, m_hes = calculate_dsi(m_raw, selected_team)
                 dsis.append(m_dsi)
@@ -406,29 +417,32 @@ def get_team_match_results(matches_df):
         
     return df
 
-def train_tes_pca_weights(leaderboard_df, save_path):
+def train_tes_pca_weights(save_path):
     """
-    Trains a Hybrid PCA-MLR model from the leaderboard features
-    to extract variance dynamically and bind it onto Win_Ratio objectively.
+    Trains a Hybrid PCA-MLR model from the match-level features
+    to extract variance dynamically and bind it onto match_goal_difference.
     """
     import json
     import numpy as np
+    import os
+    import config
+    import pandas as pd
     from sklearn.decomposition import PCA
     from sklearn.linear_model import LinearRegression
 
-    train_df = leaderboard_df[leaderboard_df['Has_DNA'] == True].copy()
-    
-    if len(train_df) < 5:
-        raise ValueError("Not enough teams with DNA profiles to train PCA reliably.")
+    train_path = os.path.join(config.DATA_DIR, "tes_train_data.csv")
+    if not os.path.exists(train_path):
+        raise FileNotFoundError("Match-level training data not found. Please run src/scripts/build_tes_dataset.py first.")
         
-    features = ['Coh_Norm', 'TxT_Norm', 'BxT_Norm', 'Dec_Norm', 'xG_Norm', 'PAcc_Norm', 'Ret_Norm', 'ITr_Norm', 'DSI_Norm', 'HES_Norm']
+    df = pd.read_csv(train_path)
+    features = ['Coh', 'TxT', 'BxT', 'Dec', 'xG', 'PAcc', 'Ret', 'ITr', 'DSI', 'HES']
     
-    for f in features:
-        if f not in train_df.columns:
-            train_df[f] = 0.5
+    # Standardize features within each competition and season
+    df[features] = df.groupby(['competition_id', 'season_id'])[features].transform(lambda x: (x - x.mean()) / (x.std() if x.std() != 0 else 1))
+    df.fillna(0.0, inplace=True)
             
-    X = train_df[features].values
-    y = train_df['Win_Ratio'].values
+    X = df[features].values
+    y = df['match_goal_difference'].values
     
     # Dynamically extract Principal Components until 85% variance is kept
     pca = PCA(n_components=0.85, svd_solver='full')
@@ -470,69 +484,81 @@ def train_tes_pca_weights(leaderboard_df, save_path):
         'r2_score': r2_score
     }
     
+    os.makedirs(os.path.dirname(save_path), exist_ok=True)
     with open(save_path, 'w') as f:
         json.dump(weights, f, indent=4)
         
     return weights
 
-def train_tes_xgboost_weights(leaderboard_df, save_path, xgb_model_path):
+def train_tes_xgboost_weights(save_path, xgb_model_path):
     """
-    Trains an XGBoost model tracking normalized feature spaces mathematically
-    and extracts universally agnostic variable SHAP weights.
+    Trains an XGBoost regressor using GroupKFold (grouped by team_id) to predict match_goal_difference.
+    Standardizes features by competition and season. Extracts global Feature Gain as weights.
     """
     import json
     import numpy as np
     import xgboost as xgb
-    import shap
-    from sklearn.preprocessing import StandardScaler
-    
-    train_df = leaderboard_df[leaderboard_df['Has_DNA'] == True].copy()
-    
-    if len(train_df) < 5:
-        raise ValueError("Not enough teams with DNA profiles to train XGBoost reliably.")
-        
-    features = ['Coh_Norm', 'TxT_Norm', 'BxT_Norm', 'Dec_Norm', 'xG_Norm', 'PAcc_Norm', 'Ret_Norm', 'ITr_Norm', 'DSI_Norm', 'HES_Norm']
-    
-    for f in features:
-        if f not in train_df.columns:
-            train_df[f] = 0.5
-            
-    X = train_df[features].values
-    y = train_df['Win_Ratio'].values
-    
-    from sklearn.model_selection import train_test_split
-    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.20, random_state=42)
-    
-    scaler = StandardScaler()
-    X_train_scaled = scaler.fit_transform(X_train)
-    X_test_scaled = scaler.transform(X_test)
-    X_scaled = scaler.transform(X)
-    
-    # Train XGBRegressor mapped iteratively
-    model = xgb.XGBRegressor(n_estimators=300, max_depth=2, learning_rate=0.1, subsample=0.7, colsample_bytree=0.7, random_state=42, early_stopping_rounds=20)
-    model.fit(X_train_scaled, y_train, eval_set=[(X_test_scaled, y_test)], verbose=False)
-    
-    # Dump tree logic to the C++ assets folder
     import os
+    import config
+    import pandas as pd
+    from sklearn.model_selection import GroupKFold
+    
+    train_path = os.path.join(config.DATA_DIR, "tes_train_data.csv")
+    if not os.path.exists(train_path):
+        raise FileNotFoundError("Match-level training data not found. Please run src/scripts/build_tes_dataset.py first.")
+        
+    df = pd.read_csv(train_path)
+    features = ['Coh', 'TxT', 'BxT', 'Dec', 'xG', 'PAcc', 'Ret', 'ITr', 'DSI', 'HES']
+    
+    # Standardize these features within each competition and season
+    df[features] = df.groupby(['competition_id', 'season_id'])[features].transform(lambda x: (x - x.mean()) / (x.std() if x.std() != 0 else 1))
+    df.fillna(0.0, inplace=True)
+
+    X = df[features].values
+    y = df['match_goal_difference'].values
+    groups = df['team_id'].values
+    
+    gkf = GroupKFold(n_splits=5)
+    
+    # Heavy regularization as specified
+    model = xgb.XGBRegressor(
+        n_estimators=300, 
+        max_depth=5, 
+        learning_rate=0.05, 
+        random_state=42
+    )
+    
+    r2_scores = []
+    
+    for train_idx, test_idx in gkf.split(X, y, groups):
+        X_train, X_test = X[train_idx], X[test_idx]
+        y_train, y_test = y[train_idx], y[test_idx]
+        
+        model.fit(X_train, y_train, eval_set=[(X_test, y_test)], verbose=False)
+        r2_scores.append(model.score(X_test, y_test))
+        
+    # Fit on all data for final weights
+    model.fit(X, y)
+    
+    # Save the model
     os.makedirs(os.path.dirname(xgb_model_path), exist_ok=True)
     model.save_model(xgb_model_path)
     
-    # Calculate SHAP global importances
-    explainer = shap.TreeExplainer(model)
-    shap_values = explainer.shap_values(X_scaled)
+    # Extract Feature Importance (Gain)
+    booster = model.get_booster()
+    importance = booster.get_score(importance_type='gain')
     
-    # Absolute Mean magnitude represents discrete global feature alignment
-    global_importance = np.mean(np.abs(shap_values), axis=0)
-    
-    sum_weights = np.sum(global_importance)
-    if sum_weights > 0:
-        w_norm = global_importance / sum_weights
-    else:
-        w_norm = np.array([1.0 / len(features)] * len(features))
+    weights_arr = np.zeros(len(features))
+    for i, f in enumerate(features):
+        f_name = f"f{i}" if f"f{i}" in importance else f
+        weights_arr[i] = importance.get(f_name, importance.get(f, 0.0))
         
-    r2_train = float(model.score(X_train_scaled, y_train))
-    r2_test = float(model.score(X_test_scaled, y_test))
-    
+    sum_w = np.sum(weights_arr)
+    if sum_w > 0:
+        w_norm = weights_arr / sum_w
+    else:
+        w_norm = np.ones(len(features)) / len(features)
+        
     weights = {
         'w_coh': float(w_norm[0]),
         'w_txt': float(w_norm[1]),
@@ -542,9 +568,10 @@ def train_tes_xgboost_weights(leaderboard_df, save_path, xgb_model_path):
         'w_pacc': float(w_norm[5]),
         'w_ret': float(w_norm[6]),
         'w_itr': float(w_norm[7]),
-        'r2_train': r2_train,
-        'r2_test': r2_test,
-        'model_architecture': 'xgboost',
+        'w_dsi': float(w_norm[8]),
+        'w_hes': float(w_norm[9]),
+        'r2_avg_cv': float(np.mean(r2_scores)),
+        'model_architecture': 'xgboost_gain',
         'saved_model_path': xgb_model_path
     }
     
@@ -552,6 +579,158 @@ def train_tes_xgboost_weights(leaderboard_df, save_path, xgb_model_path):
         json.dump(weights, f, indent=4)
         
     return weights
+
+
+def train_tes_notebook(model_save_path):
+    """
+    Exact replication of TES Final Training.ipynb.
+    Pipeline: RobustScaler + GradientBoostingRegressor.
+    Target: match_goal_ratio. Groups: match_id. 8 differential features.
+    """
+    import os, joblib, numpy as np, pandas as pd, config
+    from sklearn.ensemble import GradientBoostingRegressor
+    from sklearn.model_selection import GroupKFold
+    from sklearn.preprocessing import RobustScaler
+    from sklearn.pipeline import Pipeline
+    from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
+
+    train_path = os.path.join(config.DATA_DIR, "tes_train_data.csv")
+    if not os.path.exists(train_path):
+        raise FileNotFoundError(
+            "Match-level training data not found. "
+            "Please run src/scripts/build_tes_dataset.py first."
+        )
+
+    df = pd.read_csv(train_path)
+    core_metrics = ["xG", "Ret", "DSI", "BxT", "Dec"]
+    df = df.sort_values(["match_id", "team_id"]).copy()
+    df["team_order"] = df.groupby("match_id").cumcount()
+
+    df_0 = df[df["team_order"] == 0].copy()
+    df_1 = df[df["team_order"] == 1].copy()
+    valid_match_ids = set(df_0["match_id"]).intersection(set(df_1["match_id"]))
+    df_0 = df_0[df_0["match_id"].isin(valid_match_ids)]
+    df_1 = df_1[df_1["match_id"].isin(valid_match_ids)]
+
+    opp_map = {col: f"opp_{col}" for col in core_metrics}
+    m0 = pd.merge(df_0, df_1[["match_id"] + core_metrics].rename(columns=opp_map), on="match_id")
+    m1 = pd.merge(df_1, df_0[["match_id"] + core_metrics].rename(columns=opp_map), on="match_id")
+    df_enriched = pd.concat([m0, m1], ignore_index=True)
+
+    for col in core_metrics:
+        df_enriched[f"{col}_diff"] = df_enriched[col] - df_enriched[f"opp_{col}"]
+
+    selected_cols = ["xG_diff", "xG", "opp_xG", "Ret_diff", "opp_DSI", "BxT_diff", "Dec_diff", "Ret"]
+    df_enriched = df_enriched.dropna(subset=selected_cols + ["match_goal_ratio"])
+
+    X      = df_enriched[selected_cols]
+    y      = df_enriched["match_goal_ratio"]
+    groups = df_enriched["match_id"]
+
+    gkf = GroupKFold(n_splits=5)
+    all_preds, all_actuals = [], []
+
+    for train_idx, test_idx in gkf.split(X, y, groups):
+        fold_model = Pipeline([
+            ("scaler",    RobustScaler()),
+            ("regressor", GradientBoostingRegressor(
+                n_estimators=150, learning_rate=0.07, max_depth=4, random_state=42
+            ))
+        ])
+        fold_model.fit(X.iloc[train_idx], y.iloc[train_idx])
+        all_preds.extend(fold_model.predict(X.iloc[test_idx]))
+        all_actuals.extend(y.iloc[test_idx])
+
+    all_preds, all_actuals = np.array(all_preds), np.array(all_actuals)
+    rmse = float(np.sqrt(mean_squared_error(all_actuals, all_preds)))
+    mae  = float(mean_absolute_error(all_actuals, all_preds))
+    r2   = float(r2_score(all_actuals, all_preds))
+
+    final_model = Pipeline([
+        ("scaler",    RobustScaler()),
+        ("regressor", GradientBoostingRegressor(
+            n_estimators=150, learning_rate=0.07, max_depth=4, random_state=42
+        ))
+    ])
+    final_model.fit(X, y)
+
+    model_data = {"model": final_model, "features": selected_cols}
+    os.makedirs(os.path.dirname(model_save_path), exist_ok=True)
+    joblib.dump(model_data, model_save_path)
+
+    return {
+        "model_type": "GradientBoostingRegressor + RobustScaler",
+        "target":     "match_goal_ratio",
+        "features":   selected_cols,
+        "n_samples":  int(len(df_enriched)),
+        "cv_rmse":    rmse,
+        "cv_mae":     mae,
+        "cv_r2":      r2,
+        "model_path": model_save_path
+    }
+
+
+def predict_tes_for_team(team_dna, league_dna_df, model_save_path):
+    """
+    Predicts TES (match_goal_ratio) for one team using the notebook-trained model.
+    Uses league-average DNA as the neutral-opponent proxy for differential features.
+    Returns float clipped at 0.
+    """
+    import os, joblib, pandas as pd
+
+    if not os.path.exists(model_save_path):
+        return 0.0
+    try:
+        md    = joblib.load(model_save_path)
+        model = md["model"]
+        feats = md["features"]
+    except Exception:
+        return 0.0
+
+    # Full alias map: model key → all known dict key formats
+    # (leaderboard uses short keys; DNA profile JSON uses avg_* long keys)
+    _ALIASES = {
+        "xG":  ["xG", "xg", "avg_xg"],
+        "Ret":  ["Ret", "ret", "Retention", "retention", "avg_ret", "avg_retention"],
+        "DSI":  ["DSI", "dsi", "avg_dsi"],
+        "BxT":  ["BxT", "bxt", "Basic_xT", "basic_xt", "avg_bxt", "avg_xt"],
+        "Dec":  ["Dec", "dec", "Centralization", "centralization",
+                 "avg_dec", "avg_centralization"],
+    }
+
+    def get_val(d, key):
+        for k in _ALIASES.get(key, [key, key.lower(), f"avg_{key.lower()}"]):
+            if k in d and d[k] is not None:
+                try:
+                    return float(d[k])
+                except (TypeError, ValueError):
+                    pass
+        return 0.0
+
+    tv = {c: get_val(team_dna, c) for c in ["xG", "Ret", "DSI", "BxT", "Dec"]}
+    ov = {}
+    for c in ["xG", "Ret", "DSI", "BxT", "Dec"]:
+        try:
+            col_data = league_dna_df[c] if c in league_dna_df.columns else None
+            ov[c] = float(col_data.mean()) if col_data is not None and not col_data.empty else tv[c]
+        except Exception:
+            ov[c] = tv[c]
+
+    fv = {
+        "xG_diff":  tv["xG"]  - ov["xG"],
+        "xG":       tv["xG"],
+        "opp_xG":   ov["xG"],
+        "Ret_diff": tv["Ret"] - ov["Ret"],
+        "opp_DSI":  ov["DSI"],
+        "BxT_diff": tv["BxT"] - ov["BxT"],
+        "Dec_diff": tv["Dec"] - ov["Dec"],
+        "Ret":      tv["Ret"],
+    }
+    try:
+        pred = float(model.predict(pd.DataFrame([fv])[feats])[0])
+    except Exception:
+        return 0.0
+    return max(0.0, pred)
 
 def get_tes_weights(save_path):
     """
@@ -720,36 +899,54 @@ def calculate_championship_leaderboard(matches_df, comp_name, season_name, dna_d
         merged_df['DSI_Norm'] = 0.5
         merged_df['HES_Norm'] = 0.5
         
-    # Calculate TES
+    # Calculate TES using the notebook-trained model (predict_tes_for_team)
     import config
-    # Dynamically fetch global historically trained weightings
-    if engine_type == 'Hybrid PCA-MLR':
-        weights_path = os.path.join(config.ASSETS_DIR, "tes_pca_weights.json")
-    else:
-        weights_path = os.path.join(config.ASSETS_DIR, "tes_xgboost_weights.json")
-    w_coh, w_txt, w_bxt, w_dec, w_xg, w_pacc, w_ret, w_itr, w_dsi, w_hes = get_tes_weights(weights_path)
-    
-    merged_df['TES'] = (w_coh * merged_df['Coh_Norm']) + \
-                       (w_txt * merged_df['TxT_Norm']) + \
-                       (w_bxt * merged_df['BxT_Norm']) + \
-                       (w_dec * merged_df['Dec_Norm']) + \
-                       (w_xg * merged_df['xG_Norm']) + \
-                       (w_pacc * merged_df['PAcc_Norm']) + \
-                       (w_ret * merged_df['Ret_Norm']) + \
-                       (w_itr * merged_df['ITr_Norm']) + \
-                       (w_dsi * merged_df['DSI_Norm']) + \
-                       (w_hes * merged_df['HES_Norm'])
-                       
-    # Re-normalize TES if sum of weights changed
-    total_weights = w_coh + w_txt + w_bxt + w_dec + w_xg + w_pacc + w_ret + w_itr + w_dsi + w_hes
-    merged_df['TES'] = merged_df['TES'] / total_weights
-                       
-    # If a team has no DNA saved, set TES to 0
+    # Build a minimal league-average DataFrame from teams that have DNA
+    _league_cols = ['xG', 'Ret', 'DSI', 'BxT', 'Dec']
+    _league_df = merged_df[merged_df['Has_DNA'] == True][['Basic_xT', 'Retention', 'DSI', 'HES', 'Centralization', 'xG', 'Pass_Acc']].rename(
+        columns={'Basic_xT': 'BxT', 'Retention': 'Ret', 'Centralization': 'Dec'}
+    ) if not merged_df.empty else pd.DataFrame()
+    # Ensure we have all required cols
+    for _c in _league_cols:
+        if _c not in _league_df.columns:
+            _league_df[_c] = 0.0
+    _league_df = _league_df[_league_cols]
+
+    def _make_team_dna_dict(row):
+        return {
+            'xG': row.get('xG', 0.0),
+            'Ret': row.get('Retention', 0.0),
+            'DSI': row.get('DSI', 0.0),
+            'BxT': row.get('Basic_xT', 0.0),
+            'Dec': row.get('Centralization', 0.0),
+        }
+
+    merged_df['TES'] = merged_df.apply(
+        lambda row: predict_tes_for_team(
+            _make_team_dna_dict(row), _league_df, config.TES_MODEL_JOBLIB
+        ) if row.get('Has_DNA', False) else 0.0,
+        axis=1
+    )
+
+    # Normalise TES to 0-100 so the leaderboard table and radar ring
+    # always show the same number.
     merged_df.loc[merged_df['Has_DNA'] == False, 'TES'] = 0.0
-    
+    _has_mask = merged_df['Has_DNA'] == True
+    _t_min, _t_max = 0.0, 1.0   # fallback bounds
+    if _has_mask.sum() > 1:
+        _t_min = merged_df.loc[_has_mask, 'TES'].min()
+        _t_max = merged_df.loc[_has_mask, 'TES'].max()
+        if _t_max > _t_min:
+            merged_df.loc[_has_mask, 'TES'] = (
+                (merged_df.loc[_has_mask, 'TES'] - _t_min) / (_t_max - _t_min) * 100
+            )
+    # Store raw bounds so radar TES scoring can replicate identical normalisation
+    merged_df['TES_raw_min'] = _t_min
+    merged_df['TES_raw_max'] = _t_max
+
     # Sort by TES
     merged_df = merged_df.sort_values('TES', ascending=False).reset_index(drop=True)
-    
+
     return merged_df
 
 def calculate_all_time_leaderboard(comp_name, comp_id, get_matches_func, get_competitions_func, dna_dir, save_dir, xt_model=None, trans_checkpoint_path=None, year_threshold=None, engine_type='Hybrid PCA-MLR', force_refresh=False):
@@ -965,32 +1162,51 @@ def calculate_all_time_leaderboard(comp_name, comp_id, get_matches_func, get_com
         merged_df['DSI_Norm'] = 0.5
         merged_df['HES_Norm'] = 0.5
         
+    # Calculate TES using the notebook-trained model
     import config
-    if engine_type == 'Hybrid PCA-MLR':
-        weights_path = os.path.join(config.ASSETS_DIR, "tes_pca_weights.json")
-    else:
-        weights_path = os.path.join(config.ASSETS_DIR, "tes_xgboost_weights.json")
-    w_coh, w_txt, w_bxt, w_dec, w_xg, w_pacc, w_ret, w_itr, w_dsi, w_hes = get_tes_weights(weights_path)
+    _league_cols = ['xG', 'Ret', 'DSI', 'BxT', 'Dec']
+    _league_df = merged_df[merged_df['Has_DNA'] == True][['Basic_xT', 'Retention', 'DSI', 'HES', 'Centralization', 'xG', 'Pass_Acc']].rename(
+        columns={'Basic_xT': 'BxT', 'Retention': 'Ret', 'Centralization': 'Dec'}
+    ) if not merged_df.empty else pd.DataFrame()
+    for _c in _league_cols:
+        if _c not in _league_df.columns:
+            _league_df[_c] = 0.0
+    _league_df = _league_df[_league_cols]
 
-    merged_df['TES'] = (w_coh * merged_df['Coh_Norm']) + \
-                       (w_txt * merged_df['TxT_Norm']) + \
-                       (w_bxt * merged_df['BxT_Norm']) + \
-                       (w_dec * merged_df['Dec_Norm']) + \
-                       (w_xg * merged_df['xG_Norm']) + \
-                       (w_pacc * merged_df['PAcc_Norm']) + \
-                       (w_ret * merged_df['Ret_Norm']) + \
-                       (w_itr * merged_df['ITr_Norm']) + \
-                       (w_dsi * merged_df['DSI_Norm']) + \
-                       (w_hes * merged_df['HES_Norm'])
-                       
-    total_weights = w_coh + w_txt + w_bxt + w_dec + w_xg + w_pacc + w_ret + w_itr + w_dsi + w_hes
-    merged_df['TES'] = merged_df['TES'] / total_weights
-                       
+    def _make_team_dna_dict(row):
+        return {
+            'xG': row.get('xG', 0.0),
+            'Ret': row.get('Retention', 0.0),
+            'DSI': row.get('DSI', 0.0),
+            'BxT': row.get('Basic_xT', 0.0),
+            'Dec': row.get('Centralization', 0.0),
+        }
+
+    merged_df['TES'] = merged_df.apply(
+        lambda row: predict_tes_for_team(
+            _make_team_dna_dict(row), _league_df, config.TES_MODEL_JOBLIB
+        ) if row.get('Has_DNA', False) else 0.0,
+        axis=1
+    )
+
+    # Normalise TES to 0-100 (same scale as radar ring)
     merged_df.loc[merged_df['Has_DNA'] == False, 'TES'] = 0.0
+    _has_mask = merged_df['Has_DNA'] == True
+    _t_min, _t_max = 0.0, 1.0
+    if _has_mask.sum() > 1:
+        _t_min = merged_df.loc[_has_mask, 'TES'].min()
+        _t_max = merged_df.loc[_has_mask, 'TES'].max()
+        if _t_max > _t_min:
+            merged_df.loc[_has_mask, 'TES'] = (
+                (merged_df.loc[_has_mask, 'TES'] - _t_min) / (_t_max - _t_min) * 100
+            )
+    merged_df['TES_raw_min'] = _t_min
+    merged_df['TES_raw_max'] = _t_max
+
     merged_df = merged_df.sort_values('TES', ascending=False).reset_index(drop=True)
-    
+
     # 5. Save and return
     merged_df.to_csv(save_path, index=False)
-    
+
     return merged_df
 

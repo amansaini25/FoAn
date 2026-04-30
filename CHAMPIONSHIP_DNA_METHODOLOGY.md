@@ -1,110 +1,85 @@
-# Championship DNA Comparison Methodology
+# Tactical Efficiency Score (TES) & DNA Methodology: A Structural Performance Framework
 
-This document outlines the mathematical logic utilized to calculate the **Tactical Evaluation Score (TES)**, a unified ranking system designed to quantify and rank top team tactical identities and structural dominance within a specific championship season.
+## 1. Abstract
+This document formalizes the mathematical and statistical methodologies employed in the **Tactical Efficiency Score (TES)** framework. The framework transitions from traditional point-based metrics to a structural identity model that evaluates team performance through the lens of graph theory, spatial threat, and defensive suppression. By utilizing **Match-Level DNA** feature extraction and **Match-Goal Difference ($\Delta G$)** as the primary regressor, the model identifies the fundamental tactical components that drive consistent competitive dominance.
 
-## 1. Core Objectives
-The primary goal of the Championship DNA comparison is to evaluate fundamentally robust tactical profiles by scoring teams on metrics like Expected Threat, passing coherence, vertical transition ability, expected goals (xG), and possession retention.
+---
 
-## 2. Passing Network Graph Construction & Metrics
+## 2. Structural Identity: Passing Network Graph Construction
+The foundation of the DNA model is the representation of a football match as a directed, weighted graph $G = (V, E)$, where $V$ is the set of nodes (players) and $E$ is the set of directed edges (successful passes).
 
-All tactical identity structures are modeled using directed, weighted graphs derived directly from raw event data. 
-Let the passing network be represented as a directed graph $$G = (V, E)$$, where:
-- $V$ is the set of all unique players (nodes) who participated in a match.
-- $E$ is the set of directed passing interactions (edges) between players.
-- $w_{ij}$ represents the weight of the directed edge from player $i$ to player $j$, denoting the total volume of successful passes completed between them.
-
-From this base graph structure, we extract several core structural attributes:
-
-### Active Connected Volume (Passing Volume)
-Passing volume signifies a team's sheer possession control and connective activity. It is mathematically the total sum of edge weights in the directed graph network:
-$$\text{Volume} = \sum_{i \in V} \sum_{j \in V} w_{ij}$$
-
-### Betweenness Centralization
-Centralization measures the structural reliance a team places on specific individual "playmakers". We compute this by first calculating the Betweenness Centrality ($$C_B(v)$$) for every node, which quantifies the fraction of shortest paths that pass through that node.
-Let $\sigma_{st}$ be the total number of shortest paths from node $s$ to node $t$, and $\sigma_{st}(v)$ be the number of those paths passing through 
-
+### 2.1. Betweenness Centralization ($\sigma_{C_B}$)
+Centralization quantifies the structural fragility or "playmaker-dependency" of a network. We define the team-level centralization as the standard deviation of node-level betweenness centralities ($C_B(v)$), capturing the variance in the distribution of shortest-path control.
 $$C_B(v) = \sum_{s \neq v \neq t \in V} \frac{\sigma_{st}(v)}{\sigma_{st}}$$
+$$\text{Centralization}_{\text{team}} = \sqrt{\frac{1}{|V|} \sum_{v \in V} (C_B(v) - \mu_{C_B})^2}$$
 
-Team Centralization is then calculated as the standard deviation ($\sigma$) of the betweenness centralities across all players in the network. A high Centralization indicates extreme reliance on a few star nodes, while low centralization dictates a decentralized, balanced passing architecture.
+### 2.2. Triadic Cohesion (Clustering)
+To evaluate localized structural density—the ability to form dynamic passing triangles—we utilize the mean weighted clustering coefficient. High cohesion indicates a resilient, multi-path connection architecture.
+$$\text{Cohesion}_{\text{team}} = \frac{1}{|V|} \sum_{v \in V} C(v)$$
 
-$$\text{Centralization}_{\text{team}} = \sqrt{\frac{1}{|V|} \sum_{v \in V} \left( C_B(v) - \mu_{C_B} \right)^2}$$
+---
 
-### Triadic Cohesion (Clustering)
-Triadic cohesion quantifies the localized structural density of the team essentially, how effectively localized clusters of players pass the ball dynamically in triangles to support one another.
-This is implemented by extracting the weighted clustering coefficient ($$C(v)$$) for every node. The team's overall Cohesion is the mean of these clustering values:
+## 3. Advanced Tactical Metrics
+The DNA profile consists of 10 dimensions, integrating the following state-of-the-art metrics:
 
-$$ Cohesion_{team} = \frac{1}{|V|} \sum_{v \in V} C(v) $$
+### 3.1. Defensive Suppression Index (DSI)
+DSI evaluates a team's ability to force sub-optimal opponent behavior through pressure. It incorporates spatial weighting ($w_s = 1.5$ in high-value zones, $1.0$ elsewhere) and scales by the opponent's resulting failure rate.
+$$DSI = \frac{\sum_{p \in P_{opp}} (w_s \cdot \mathbb{I}_{\text{pressure}}(p))}{|P_{opp}|} \times (1 - \text{Pass Completion Rate}_{opp})$$
 
-Higher generalized cohesion represents strong, systemic short-range support structures universally embedded regardless of position.
+### 3.2. High-Efficiency Suppression (HES)
+HES measures the conversion of pressure into immediate possession retrieval. It is a temporal correlation metric identifying "three-second recovery windows" following a pressure event.
+$$HES = \sum_{p \in P_{\text{team}}} \mathbb{I}(\exists r \in R_{\text{team}} : t_r \in [t_p, t_p + 3s])$$
+*Where $R$ is the set of Interceptions and Ball Recoveries.*
 
-## 3. Match Results & Win/Loss Ratios
-While the TES operates independently of points entirely to act as an objective indicator of *how* a team plays, we still log their points trajectory to compare tactical identity against actual point accumulation:
-Assuming a team plays $N$ matches, having $W$ wins, $D$ draws, and $L$ losses:
-- **Win Ratio ($W_R$)**: $\displaystyle W_R = \frac{W}{N}$
-- **Loss Ratio ($L_R$)**: $\displaystyle L_R = \frac{L}{N}$
-- **Win-Loss Spread ($S_{WL}$)**: $\displaystyle S_{WL} = W_R - L_R$
+### 3.3. TransGoalNet & Delta xT ($\Delta xT$)
+Utilizing a Graph Transformer ($k=5$ action window), we compute the dynamic Expected Threat surplus ($\Delta xT$) generated during transition phases, identifying verticality and structural progression.
 
-The Win-Loss Spread naturally penalizes teams that lose frequently and rewards consistent winners, bound roughly between $[-1, 1]$. In practical terms, to avoid negative indices, we normalize $S_{WL}$ across the championship to a $$0 \rightarrow 1$$ scale:
+---
 
-$$ \hat{S}_{WL} = \frac{S_{WL} - \min(S_{WL})}{\max(S_{WL}) - \min(S_{WL})} $$
+## 4. Modeling & Optimization Strategy
+The TES engine employs a dual-stage optimization process to derive the weighted composite score.
 
-## 4. Tactical Efficacy Score (TES)
-The Tactical Efficacy Score represents a single numerical value (0 to 1) outlining how "dominant" a team's playing style is. It aggregates our advanced "Team DNA" multi-dimensional network space into a single metric.
+### 4.1. Transition to Match-Level Modeling
+To increase sample size and capture tactical variance across different contexts, the target variable has transitioned from season-level win ratios to **Match-Level Goal Difference ($\Delta G$)**. This transforms the problem into a regression task where we predict the scoring margin based on the match-day DNA profile.
 
-Before aggregation, each metric $M$ for every team is min-max normalized ($M_{norm}$) compared to the rest of the teams in the *same* championship:
+### 4.2. Feature Engineering & Intra-Group Standardization
+To isolate tactical efficiency from differing league qualities (e.g., comparing the Premier League to the ISL), features are **Z-score normalized within each competition and season**. This ensures the models learn "Competitive Advantage" relative to the specific environment rather than raw volume metrics.
+$$\hat{x}_{i,c,s} = \frac{x_{i,c,s} - \mu_{c,s}}{\sigma_{c,s}}$$
 
-$$ M_{norm_{i}} = \frac{M_i - \min(M_{all})}{\max(M_{all}) - \min(M_{all})} $$
+### 4.3. Optimization Engines
+*   **Engine 1: Hybrid PCA-MLR**: Utilizes Principal Component Analysis to extract orthogonal tactical components, followed by OLS regression. This eliminates multi-collinearity between metrics like Cohesion and Retention.
+*   **Engine 2: XGBoost (Gain-based)**: A non-linear gradient-boosted tree model. We extract feature importance via the **Gain metric** (average reduction in loss brought by a feature), providing a precise structural importance weight for each DNA dimension.
 
-### Components of the TES (8 Dimensions):
-1. **Cohesion ($Coh$)**: Higher is better (dense triangle passing loops).
-2. **Delta xT per Match ($TxT$)**: TransGoalNet Expected Threat generated per match.
-3. **Basic xT per Match ($BxT$)**: Baseline positional expected threat per match.
-4. **Decentralization ($Dec$)**: Calculated as $1 - \text{Centralization}_{norm}$. Rewards distributed network architectures rather than single playmakers.
-5. **Expected Goals - xG ($xG$)**: Direct volume of traditional Expected Goals.
-6. **Passing Accuracy ($PAcc$)**: Ratio of completed passes to intended passes.
-7. **Retention Ability ($Ret$)**: The structural stability under possession sequences (Calculated via passes/duration per possession period).
-8. **Verticality / Itrans ($ITr$)**: Transition efficiency modifier identifying quickly evolving threat, calculated as $\displaystyle I_{Trans} = \frac{\sum TransGoal\ xT}{Total\ Possession\ Duration}$.
+### 4.4. Validation & Generalization (GroupKFold)
+To prevent the model from "memorizing" specific high-performing team names (Team Identity Leakage), we implement **GroupKFold Cross-Validation**.
+*   **Grouping Criterion**: `team_id`
+*   **Mechanism**: The model is trained on one set of teams and validated on a completely disjoint set of teams. This forces the model to learn the **Tactical Laws** of success that generalize across all entities.
 
-**TES Calculation:**
+---
 
-$$ TES = (w_1 \overline{Coh}) + (w_2 \overline{TxT}) + (w_3 \overline{BxT}) + (w_4 \overline{Dec}) + (w_5 \overline{xG}) + (w_6 \overline{PAcc}) + (w_7 \overline{Ret}) + (w_8 \overline{ITr}) $$
+## 5. The Tactical Efficiency Score (TES) Formula
+The final TES is a weighted summation of 10 normalized dimensions ($D_1 \dots D_{10}$), providing a unified index of structural dominance:
 
-Currently, the default heuristic weights assign an even 12.5% distribution across all 8 factors if MLR is deactivated:
-- $w_1 = w_2 = w_3 = w_4 = w_5 = w_6 = w_7 = w_8 = 0.125$
+$$TES = \sum_{j=1}^{10} w_j \cdot D_{j, \text{norm}}$$
 
-Note: The TES naturally scales from $$0 \rightarrow 1$$ assuming optimal components. An average team will sit around $$0.4 - 0.6$$.
+**Feature Dimensions:**
+1.  **Cohesion** ($w_{coh}$)
+2.  **Trans_xT** ($w_{txt}$)
+3.  **Basic_xT** ($w_{bxt}$)
+4.  **Decentralization** ($w_{dec}$)
+5.  **Expected Goals (xG)** ($w_{xg}$)
+6.  **Passing Accuracy** ($w_{pacc}$)
+7.  **Retention** ($w_{ret}$)
+8.  **Verticality (ITrans)** ($w_{itr}$)
+9.  **Defensive Suppression (DSI)** ($w_{dsi}$)
+10. **High-Efficiency Suppression (HES)** ($w_{hes}$)
 
-### Optimization Engine 1: Hybrid PCA-MLR
-To solve the "Collinearity Problem" where tactical features are naturally correlated (e.g., high Cohesion often correlates with high Retention), we implement a **Hybrid PCA-MLR** approach.
-1.  **Dimensionality Reduction (PCA):** We extract the first 3-4 Principal Components (orthogonal axes) that capture >80% of the tactical variance across all teams.
-2.  **Orthogonal Regression:** We run an Ordinary Least Squares (OLS) regression using these uncorrelated PCs as inputs against the team Win Ratio.
-3.  **Weight Back-Projection:** The resulting coefficients are projected back onto the original 8-dimensional space to derive stable, non-redundant feature importance weights.
+---
 
-### Optimization Engine 2: XGBoost & SHAP (Non-Linear)
-For complex tactical landscapes where relationships are non-linear, we utilize an **XGBRegressor** (Gradient Boosting).
-1.  **Non-Linear Modeling:** Captures decision-tree based relationships between metrics (e.g., Verticality is only positive if Passing Accuracy stays above a certain threshold).
-2.  **SHAP (SHapley Additive exPlanations):** Instead of raw coefficients, we calculate the global average impact (mean absolute SHAP) of every feature on the model's predictions. These SHAP values determine the relative weights in the TES equation, ensuring the ranking is driven by actual predictive contribution.
-
-## 4.2. Global Optimization & Validation
-To establish a "Universal Tactical Benchmark," the framework supports **Global All-Time Optimization**. 
-- **Cross-Competition Training:** The models aggregate match data across all available leagues and seasons (post a user-defined year threshold) to find universal "Winning DNA" traits.
-- **Model Validation:** 
-    - **80/20 Train/Test Split:** Models are trained on a subset of the global data and validated against held-out matches to ensure generalization.
-    - **Early Stopping:** XGBoost training utilizes a validation set with a patience of 10 rounds to prevent "memorization" of specific team names and ensure tactical metrics are the primary drivers.
-    - **R² Scoring:** The dashboard explicitly reports the $R^2$ coefficient of determination for both sets to monitor model health.
-
-## 4.3. Unified Weight Pipeline
-All optimized weights are serialized to a centralized `assets/` directory (`tes_pca_weights.json`, `tes_xgboost_weights.json`). The dashboard implements a **Hierarchical Fallback Mapping**:
-1.  **Season-Specific Weights** (if trained)
-2.  **League All-Time Weights** (if trained)
-3.  **Global Historical Weights** (Master Fallback)
-
-This ensures that the "Global" model provides a robust analytical baseline even for competitions with limited data.
-
-## 5. Algorithmic Workflow
-1. **Offline-First Data Resolution:** Check for local `{Team}_raw_events.csv` to bypass API latency. If missing, fetch match-level data via `statsbombpy` and cache locally.
-2. **Global Result Aggregation:** Calculate Win/Loss ratios and Win-Loss spreads across the defined temporal window (e.g., matches since 2015).
-3. **Multi-League DNA Retrieval:** Recursively load or compute DNA profiles across all relevant competitions to build the high-dimensional feature matrix.
-4. **TES Model Inference:** Apply the chosen optimization engine (PCA-MLR or XGBoost) using weights loaded from the centralized `assets/` pipeline.
-5. **Contextual Normalization:** Z-Score or Min-Max normalize the 8 DNA traits across the active dataset.
-6. **Ranking:** Compute final **TES** and generate dynamic leaderboard visualizations.
+## 6. Algorithmic Workflow
+1.  **ETL Pipeline**: Resolve match-level event streams from StatsBomb API or local caches.
+2.  **DNA Extraction**: Compute 10 structural metrics per team per match.
+3.  **Cross-Competition Standardization**: Group by (League, Season) and apply Z-score scaling.
+4.  **Batch Training**: Execute XGBoost/PCA-MLR on the global dataset using GroupKFold.
+5.  **Weight Persistence**: Export `optimized_dna_weights.json` to the unified `assets/` directory.
+6.  **Inference**: Apply global weights to any selected team profile to compute the real-time TES ranking.

@@ -40,4 +40,8 @@ TGN_GLOBAL_CHECKPOINT = os.path.join(ASSETS_DIR, 'transgoalnet_global.pth')
 TGN_REPORT = os.path.join(ASSETS_DIR, 'transgoalnet_training_report.json')
 TGN_ARCH_TXT = os.path.join(ASSETS_DIR, 'transgoalnet_architecture.txt')
 
+# TES Notebook Model (GradientBoosting + RobustScaler pipeline — TES Final Training.ipynb)
+TES_MODEL_JOBLIB    = os.path.join(ASSETS_DIR, 'tes_model_v1.joblib')
+TES_YEAR_THRESHOLD  = 2015   # Only use seasons starting from this year for All-Time leaderboard
+
 DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'

@@ -295,13 +295,14 @@ def plot_championship_leaderboard(leaderboard_df):
     if 'Cohesion' in display_df.columns:
         cols_to_show.extend(['Cohesion', 'Trans_xT', 'Basic_xT', 'Centralization', 'xG', 'Pass_Acc', 'Retention', 'DSI', 'HES', 'ITrans'])
         
+    display_df = display_df[[c for c in display_df.columns if c not in ('TES_raw_min', 'TES_raw_max')]]
     display_df = display_df[cols_to_show]
-    
+
     # Formatting
     format_dict = {
         'Win_Ratio': '{:.2%}',
         'Loss_Ratio': '{:.2%}',
-        'TES': '{:.3f}',
+        'TES': '{:.1f}',          # 0-100 scale
         'Cohesion': '{:.3f}',
         'Trans_xT': '{:.3f}',
         'Basic_xT': '{:.3f}',

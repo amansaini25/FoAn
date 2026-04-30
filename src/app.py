@@ -108,41 +108,19 @@ if nav_mode == "Model Pipeline & Optimization":
             st.info("No TGN training logs available.")
             
     with tcol3:
-        tes_engine = st.session_state.get('tes_engine', 'Hybrid PCA-MLR')
-        if tes_engine == 'Hybrid PCA-MLR':
-            st.markdown("**TES PCA Principal Component Distribution**")
-            log_prefix = "tes_pca_weights"
-        else:
-            st.markdown("**TES XGBoost SHAP Distribution**")
-            log_prefix = "tes_xgboost_weights"
-            
-        log_path = os.path.join(config.ASSETS_DIR, f"{log_prefix}.json")
-        
-        if os.path.exists(log_path):
-            import json, pandas as pd
+        st.markdown("**TES Model Status (Notebook Pipeline)**")
+        import joblib as _jl
+        if os.path.exists(config.TES_MODEL_JOBLIB):
             try:
-                with open(log_path, "r") as f:
-                    log_data = json.load(f)
-                
-                exclude_keys = ['explained_variance', 'mse', 'r2_score', 'r2_train', 'r2_test', 'cumulative_variance', 'n_components', 'model_architecture', 'saved_model_path']
-                w_dict = {k: v for k, v in log_data.items() if k not in exclude_keys}
-                w_df = pd.DataFrame([w_dict]).T
-                w_df.columns = ["Weight Profile"]
-                st.bar_chart(w_df, height=210)
-                
-                if "cumulative_variance" in log_data:
-                    cvar = log_data['cumulative_variance']
-                    n_comp = log_data.get('n_components', '?')
-                    r2 = log_data.get('r2_score', 0)
-                    st.success(f"**Trained on {n_comp} Principal Components (Cumulative Variance: {cvar:.1f}%) | R²:** {r2:.3f}")
-                elif "model_architecture" in log_data and log_data["model_architecture"] == "xgboost":
-                    r2_train = log_data.get('r2_train', 0)
-                    r2_test = log_data.get('r2_test', 0)
-                    st.success(f"**XGBoost SHAP (Early Stopped)** | Train R²: {r2_train:.3f} | Test R²: {r2_test:.3f}")
-            except Exception:
-                st.info("Log format temporarily mismatched.")
+                _md = _jl.load(config.TES_MODEL_JOBLIB)
+                _feats = _md.get('features', [])
+                st.success(f"✅ Loaded: {type(_md['model']).__name__}")
+                st.caption(f"Features ({len(_feats)}): {', '.join(_feats)}")
+            except Exception as _e:
+                st.warning(f"Model file exists but failed to load: {_e}")
         else:
-            st.info(f"No {tes_engine} optimization logs available.")
+            st.info("No TES model found. Click **Optimize TES Weights** to train.")
+
     
     st.sidebar.markdown("---")
     st.sidebar.header("🌍 Global Model Training")
@@ -232,15 +210,12 @@ if nav_mode == "Model Pipeline & Optimization":
         
     st.sidebar.markdown("---")
     st.sidebar.header("🧠 Optimize TES Weights")
-    tes_engine_choice = st.sidebar.radio("TES Engine", ["Hybrid PCA-MLR", "XGBoost (SHAP)"])
-    st.session_state['tes_engine'] = tes_engine_choice
-    
-    tes_year_threshold = st.sidebar.number_input("Year Threshold (All-Time)", min_value=1990, max_value=2030, value=2015, step=1)
+    st.sidebar.caption(f"Model: GradientBoosting + RobustScaler | Year ≥ {config.TES_YEAR_THRESHOLD}")
     if st.sidebar.button("Optimize (Current Season)"):
         st.session_state['run_opt_curr'] = True
-    if st.sidebar.button("Optimize (All-Time)"):
+    if st.sidebar.button("Optimize TES Weights"):
         st.session_state['run_opt_all'] = True
-        st.session_state['tes_year_threshold'] = tes_year_threshold
+
         
     st.sidebar.markdown("---")
     st.sidebar.header("🏆 Championship Leaderboard")
@@ -394,32 +369,23 @@ if nav_mode == "Model Pipeline & Optimization" and team_matches is not None and 
         
     if st.session_state.get('run_opt_all', False):
         st.subheader("🧠 Optimize TES Weights (Global Model)")
-        with st.spinner("Computing Global All-Time Leaderboard..."):
-            from utils.data_loader import get_competitions, get_matches
-            from engine.metrics import calculate_all_time_leaderboard
-            year_thresh = st.session_state.get('tes_year_threshold', 2015)
-            ldr_df = calculate_all_time_leaderboard("Global", None, get_matches, get_competitions, config.DNA_DIR, config.LEADERBOARD_DIR, xt_model=xt_model, trans_checkpoint_path=trans_checkpoint_path, year_threshold=year_thresh)
-            tes_engine = st.session_state.get('tes_engine', 'Hybrid PCA-MLR')
-            
-            if tes_engine == 'Hybrid PCA-MLR':
-                from engine.metrics import train_tes_pca_weights
-                weights_path = os.path.join(config.ASSETS_DIR, "tes_pca_weights.json")
-            else:
-                from engine.metrics import train_tes_xgboost_weights
-                weights_path = os.path.join(config.ASSETS_DIR, "tes_xgboost_weights.json")
-                xgb_model_path = os.path.join(config.ASSETS_DIR, "global_xgboost_model.json")
-                
+        with st.spinner("Training notebook-exact TES model (GradientBoosting + RobustScaler)..."):
+            from engine.metrics import train_tes_notebook
             try:
-                os.makedirs(os.path.dirname(weights_path), exist_ok=True)
-                if tes_engine == 'Hybrid PCA-MLR':
-                    new_weights = train_tes_pca_weights(ldr_df, weights_path)
-                else:
-                    new_weights = train_tes_xgboost_weights(ldr_df, weights_path, xgb_model_path)
-                st.success(f"{tes_engine} Global weights optimized successfully!")
-                st.json(new_weights)
+                new_results = train_tes_notebook(config.TES_MODEL_JOBLIB)
+                st.success(
+                    f"✅ TES model trained & saved! "
+                    f"CV R²: {new_results['cv_r2']:.3f} | "
+                    f"RMSE: {new_results['cv_rmse']:.4f} | "
+                    f"MAE: {new_results['cv_mae']:.4f} | "
+                    f"N: {new_results['n_samples']:,}"
+                )
+                st.json(new_results)
             except Exception as e:
-                st.error(f"Failed to optimize weights: {e}")
+                st.error(f"Failed to train TES model: {e}")
         st.session_state['run_opt_all'] = False
+
+
 
 
 elif nav_mode == "DNA Split Analysis" and team_matches is not None and not team_matches.empty:
@@ -444,40 +410,44 @@ elif nav_mode == "DNA Split Analysis" and team_matches is not None and not team_
             from engine.metrics import calculate_championship_leaderboard, get_tes_weights
             leaderboard_df = calculate_championship_leaderboard(all_matches, selected_comp_name, selected_season_name, config.DNA_DIR, xt_model=xt_model, trans_checkpoint_path=trans_checkpoint_path)
             
-            tes_engine = st.session_state.get('tes_engine', 'Hybrid PCA-MLR')
-            log_prefix = "tes_pca_weights" if tes_engine == 'Hybrid PCA-MLR' else "tes_xgboost_weights"
-            weights_path = os.path.join(config.ASSETS_DIR, f"{log_prefix}.json")
-                
-            if os.path.exists(weights_path):
-                w_coh, w_txt, w_bxt, w_dec, w_xg, w_pacc, w_ret, w_itr, w_dsi, w_hes = get_tes_weights(weights_path)
-            else:
-                w_coh, w_txt, w_bxt, w_dec, w_xg, w_pacc, w_ret, w_itr, w_dsi, w_hes = 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1
-                
+            from engine.metrics import predict_tes_for_team
+
+            # Build league DNA proxy filtering to DNA-having teams ONLY
+            # — identical to how calculate_championship_leaderboard builds _league_df
+            def _build_league_proxy(ldf):
+                if ldf is None or ldf.empty: return pd.DataFrame()
+                mask = ldf['Has_DNA'] == True if 'Has_DNA' in ldf.columns else pd.Series([True]*len(ldf))
+                sub = ldf[mask][['Basic_xT','Retention','DSI','Centralization','xG']].rename(
+                    columns={'Basic_xT':'BxT','Retention':'Ret','Centralization':'Dec'}
+                )
+                for c in ['xG','Ret','DSI','BxT','Dec']:
+                    if c not in sub.columns: sub[c] = 0.0
+                return sub[['xG','Ret','DSI','BxT','Dec']]
+
+            def _dna_to_model_dict(dna):
+                """Convert raw DNA profile dict to the short-key format expected by predict_tes_for_team."""
+                if not dna: return {}
+                return {
+                    'xG':  float(dna.get('avg_xg', dna.get('xG', 0.0)) or 0.0),
+                    'Ret': float(dna.get('avg_retention', dna.get('Ret', 0.0)) or 0.0),
+                    'DSI': float(dna.get('avg_dsi', dna.get('DSI', 0.0)) or 0.0),
+                    'BxT': float(dna.get('avg_xt', dna.get('BxT', 0.0)) or 0.0),
+                    'Dec': float(dna.get('avg_centralization', dna.get('Dec', 0.0)) or 0.0),
+                }
+
+            _ldna = _build_league_proxy(leaderboard_df)
+
+            # Read raw bounds stored by the leaderboard function
+            _raw_min = float(leaderboard_df['TES_raw_min'].iloc[0]) if 'TES_raw_min' in leaderboard_df.columns and not leaderboard_df.empty else None
+            _raw_max = float(leaderboard_df['TES_raw_max'].iloc[0]) if 'TES_raw_max' in leaderboard_df.columns and not leaderboard_df.empty else None
+
             def calc_tes(subset_dict):
                 if not subset_dict or leaderboard_df.empty: return 0.0
-                
-                def get_norm(val, col):
-                    if col not in leaderboard_df.columns: return 0.5
-                    c_min = leaderboard_df[col].min()
-                    c_max = leaderboard_df[col].max()
-                    if c_max == c_min or pd.isna(c_max) or pd.isna(c_min): return 0.5
-                    return (val - c_min) / (c_max - c_min)
-                    
-                coh_norm = get_norm(subset_dict.get('avg_cohesion', 0), 'Cohesion')
-                txt_norm = get_norm(subset_dict.get('avg_trans_xt', 0), 'Trans_xT')
-                bxt_norm = get_norm(subset_dict.get('avg_xt', 0), 'Basic_xT')
-                dec_norm = 1.0 - get_norm(subset_dict.get('avg_centralization', 0), 'Centralization')
-                xg_norm = get_norm(subset_dict.get('avg_xg', 0), 'xG')
-                pacc_norm = get_norm(subset_dict.get('avg_pass_acc', 0), 'Pass_Acc')
-                ret_norm = get_norm(subset_dict.get('avg_retention', 0), 'Retention')
-                itr_norm = get_norm(subset_dict.get('avg_itrans', 0), 'ITrans')
-                dsi_norm = get_norm(subset_dict.get('avg_dsi', 0), 'DSI')
-                hes_norm = get_norm(subset_dict.get('avg_hes', 0), 'HES')
-                
-                tes = (w_coh * coh_norm) + (w_txt * txt_norm) + (w_bxt * bxt_norm) + (w_dec * dec_norm) + (w_xg * xg_norm) + (w_pacc * pacc_norm) + (w_ret * ret_norm) + (w_itr * itr_norm) + (w_dsi * dsi_norm) + (w_hes * hes_norm)
-                # Re-normalize just in case
-                total_w = w_coh + w_txt + w_bxt + w_dec + w_xg + w_pacc + w_ret + w_itr + w_dsi + w_hes
-                return max(0.0, (tes / total_w) * 100) # Scale TES to 0-100 for display
+                raw = predict_tes_for_team(_dna_to_model_dict(subset_dict), _ldna, config.TES_MODEL_JOBLIB)
+                if _raw_min is not None and _raw_max is not None and _raw_max > _raw_min:
+                    return max(0.0, min(100.0, (raw - _raw_min) / (_raw_max - _raw_min) * 100))
+                return max(0.0, raw * 100)
+
             
             if not leaderboard_df.empty and len(leaderboard_df) > 1 and selected_team in leaderboard_df['Team'].values:
                 team_row = leaderboard_df[leaderboard_df['Team'] == selected_team].iloc[0]
@@ -634,8 +604,31 @@ elif nav_mode == "DNA Split Analysis" and team_matches is not None and not team_
                         st.metric(f"Cosine Similarity ({selected_team} vs {target_team})", f"{sim*100:.2f}%")
                         
                         st.markdown("### Tactical Radar Comparison")
-                        tes1 = calc_tes(overall) if 'calc_tes' in locals() else None
-                        tes2 = calc_tes(target_overall) if 'calc_tes' in locals() else None
+                        from engine.metrics import predict_tes_for_team
+                        # Filter to DNA-having teams only — matches leaderboard _league_df
+                        _lp_mask = _ldf['Has_DNA'] == True if (_ldf is not None and 'Has_DNA' in _ldf.columns) else None
+                        _league_proxy = (_ldf[_lp_mask][['Basic_xT','Retention','DSI','Centralization','xG']].rename(
+                            columns={'Basic_xT':'BxT','Retention':'Ret','Centralization':'Dec'}
+                        ) if _lp_mask is not None and _lp_mask.any() else pd.DataFrame())
+                        for _c in ['xG','Ret','DSI','BxT','Dec']:
+                            if _c not in _league_proxy.columns: _league_proxy[_c] = 0.0
+                        _r_min = float(_ldf['TES_raw_min'].iloc[0]) if _ldf is not None and 'TES_raw_min' in _ldf.columns and not _ldf.empty else None
+                        _r_max = float(_ldf['TES_raw_max'].iloc[0]) if _ldf is not None and 'TES_raw_max' in _ldf.columns and not _ldf.empty else None
+                        def _to_md(dna):
+                            if not dna: return {}
+                            return {'xG': float(dna.get('avg_xg', dna.get('xG', 0.0)) or 0.0),
+                                    'Ret': float(dna.get('avg_retention', dna.get('Ret', 0.0)) or 0.0),
+                                    'DSI': float(dna.get('avg_dsi', dna.get('DSI', 0.0)) or 0.0),
+                                    'BxT': float(dna.get('avg_xt', dna.get('BxT', 0.0)) or 0.0),
+                                    'Dec': float(dna.get('avg_centralization', dna.get('Dec', 0.0)) or 0.0)}
+                        def _tes_score(dna_dict):
+                            if not dna_dict: return None
+                            raw = predict_tes_for_team(_to_md(dna_dict), _league_proxy, config.TES_MODEL_JOBLIB)
+                            if _r_min is not None and _r_max is not None and _r_max > _r_min:
+                                return max(0.0, min(100.0, (raw - _r_min) / (_r_max - _r_min) * 100))
+                            return max(0.0, raw * 100)
+                        tes1 = _tes_score(overall if 'overall' in locals() else None)
+                        tes2 = _tes_score(target_overall)
                         plot_dual_dna_radar(selected_team, overall, target_team, target_overall, leaderboard_df=_ldf, tes1=tes1, tes2=tes2)
                         display_dna_comparison_table(selected_team, overall, target_team, target_overall)
                     else:
@@ -665,8 +658,30 @@ elif nav_mode == "DNA Split Analysis" and team_matches is not None and not team_
                                 st.metric(f"Cosine Similarity (Historical vs Selected Match)", f"{sim*100:.2f}%")
                                 
                                 st.markdown("### Tactical Radar Comparison")
-                                tes1 = calc_tes(overall) if 'calc_tes' in locals() else None
-                                tes2 = calc_tes(match_dna) if 'calc_tes' in locals() else None
+                                from engine.metrics import predict_tes_for_team
+                                _lp_mask2 = _ldf['Has_DNA'] == True if (_ldf is not None and 'Has_DNA' in _ldf.columns) else None
+                                _league_proxy2 = (_ldf[_lp_mask2][['Basic_xT','Retention','DSI','Centralization','xG']].rename(
+                                    columns={'Basic_xT':'BxT','Retention':'Ret','Centralization':'Dec'}
+                                ) if _lp_mask2 is not None and _lp_mask2.any() else pd.DataFrame())
+                                for _c2 in ['xG','Ret','DSI','BxT','Dec']:
+                                    if _c2 not in _league_proxy2.columns: _league_proxy2[_c2] = 0.0
+                                _r_min2 = float(_ldf['TES_raw_min'].iloc[0]) if _ldf is not None and 'TES_raw_min' in _ldf.columns and not _ldf.empty else None
+                                _r_max2 = float(_ldf['TES_raw_max'].iloc[0]) if _ldf is not None and 'TES_raw_max' in _ldf.columns and not _ldf.empty else None
+                                def _to_md2(dna):
+                                    if not dna: return {}
+                                    return {'xG': float(dna.get('avg_xg', dna.get('xG', 0.0)) or 0.0),
+                                            'Ret': float(dna.get('avg_retention', dna.get('Ret', 0.0)) or 0.0),
+                                            'DSI': float(dna.get('avg_dsi', dna.get('DSI', 0.0)) or 0.0),
+                                            'BxT': float(dna.get('avg_xt', dna.get('BxT', 0.0)) or 0.0),
+                                            'Dec': float(dna.get('avg_centralization', dna.get('Dec', 0.0)) or 0.0)}
+                                def _tes_score2(dna_dict):
+                                    if not dna_dict: return None
+                                    raw = predict_tes_for_team(_to_md2(dna_dict), _league_proxy2, config.TES_MODEL_JOBLIB)
+                                    if _r_min2 is not None and _r_max2 is not None and _r_max2 > _r_min2:
+                                        return max(0.0, min(100.0, (raw - _r_min2) / (_r_max2 - _r_min2) * 100))
+                                    return max(0.0, raw * 100)
+                                tes1 = _tes_score2(overall if 'overall' in locals() else None)
+                                tes2 = _tes_score2(match_dna)
                                 plot_dual_dna_radar(f"{selected_team} (Historical)", overall, "Match DNA", match_dna, leaderboard_df=_ldf, tes1=tes1, tes2=tes2)
                                 display_dna_comparison_table(f"{selected_team} (Historical)", overall, "Match DNA", match_dna)
                             else:
@@ -689,10 +704,41 @@ elif nav_mode == "Visual Analytics" and team_matches is not None and not team_ma
             
             # Calculate DNA using the full pass_df (representing whole matches)
             overall_dna_metrics = calculate_team_dna(pass_df, raw_df)
-            
+
+            # ── Build the SAME current-season leaderboard used by DNA Split Analysis ──
+            # This ensures radar axis normalisation uses identical min/max bounds in
+            # both Visual Analytics and DNA Split Analysis, so the same DNA values
+            # always produce the same radar shape.
+            with st.spinner("Loading season context for radar normalization..."):
+                from engine.metrics import calculate_championship_leaderboard, predict_tes_for_team as _ptf
+                _va_season_ldr = calculate_championship_leaderboard(
+                    all_matches, selected_comp_name, selected_season_name,
+                    config.DNA_DIR, xt_model=xt_model, trans_checkpoint_path=trans_checkpoint_path
+                )
+
+            # ── TES: use the same raw bounds the leaderboard stored ───────────────
+            _va_league_proxy = pd.DataFrame()
+            _ldr_for_norm = _va_season_ldr if not _va_season_ldr.empty else comp_all_time_df
+            if not _ldr_for_norm.empty:
+                _cols_needed = ['xG', 'Retention', 'DSI', 'Basic_xT', 'Centralization']
+                _avail = [c for c in _cols_needed if c in _ldr_for_norm.columns]
+                if _avail:
+                    _va_league_proxy = _ldr_for_norm[_avail].rename(
+                        columns={'Retention': 'Ret', 'Basic_xT': 'BxT', 'Centralization': 'Dec'}
+                    )
+            _va_raw   = _ptf(overall_dna_metrics, _va_league_proxy, config.TES_MODEL_JOBLIB)
+            _va_r_min = float(_ldr_for_norm['TES_raw_min'].iloc[0]) if 'TES_raw_min' in _ldr_for_norm.columns and not _ldr_for_norm.empty else None
+            _va_r_max = float(_ldr_for_norm['TES_raw_max'].iloc[0]) if 'TES_raw_max' in _ldr_for_norm.columns and not _ldr_for_norm.empty else None
+            if _va_r_min is not None and _va_r_max is not None and _va_r_max > _va_r_min:
+                _va_tes = max(0.0, min(100.0, (_va_raw - _va_r_min) / (_va_r_max - _va_r_min) * 100))
+            else:
+                _va_tes = max(0.0, _va_raw * 100)
+
             col_r1, col_r2, col_r3 = st.columns([1, 2, 1])
             with col_r2:
-                plot_dna_radar(overall_dna_metrics, leaderboard_df=comp_all_time_df)
+                # Pass the current-season leaderboard so axes match DNA Split Analysis
+                plot_dna_radar(overall_dna_metrics, cdi=_va_tes, leaderboard_df=_ldr_for_norm)
+
 
             # --- ROW 1: NETWORK HEALTH METRICS ---
             st.markdown("---")
@@ -749,12 +795,7 @@ elif nav_mode == "Visual Analytics" and team_matches is not None and not team_ma
         plot_tactical_heatmap(filtered_df, top_lane)
 
     with tab4:
-        col_scope, col_engine = st.columns(2)
-        with col_scope:
-            scope = st.radio("Leaderboard Scope:", ["Current Season", "All-Time (All Seasons)"], horizontal=True)
-        with col_engine:
-            def_idx = 0 if st.session_state.get('tes_engine', 'Hybrid PCA-MLR') == 'Hybrid PCA-MLR' else 1
-            rank_engine = st.radio("TES Ranking Engine:", ["Hybrid PCA-MLR", "XGBoost (SHAP)"], index=def_idx, horizontal=True)
+        scope = st.radio("Leaderboard Scope:", ["Current Season", "All-Time (All Seasons)"], horizontal=True)
         
         if scope == "Current Season":
             if all_matches is not None and not all_matches.empty:
@@ -765,10 +806,10 @@ elif nav_mode == "Visual Analytics" and team_matches is not None and not team_ma
                         selected_season_name, 
                         config.DNA_DIR, 
                         xt_model=xt_model,
-                        trans_checkpoint_path=trans_checkpoint_path,
-                        engine_type=rank_engine
+                        trans_checkpoint_path=trans_checkpoint_path
                     )
                     plot_championship_leaderboard(leaderboard_df)
+
                     
                     st.markdown("---")
                     st.subheader("🧬 Batch Visualise & Export Team DNA")
@@ -845,7 +886,6 @@ elif nav_mode == "Visual Analytics" and team_matches is not None and not team_ma
                     from utils.data_loader import get_competitions, get_matches
                     from engine.metrics import calculate_all_time_leaderboard
                     
-                    year_thresh = st.session_state.get('tes_year_threshold', 2015)
                     leaderboard_df = calculate_all_time_leaderboard(
                         selected_comp_name, 
                         comp_id, 
@@ -855,9 +895,9 @@ elif nav_mode == "Visual Analytics" and team_matches is not None and not team_ma
                         config.LEADERBOARD_DIR,
                         xt_model=xt_model,
                         trans_checkpoint_path=trans_checkpoint_path,
-                        year_threshold=year_thresh,
-                        engine_type=rank_engine
+                        year_threshold=config.TES_YEAR_THRESHOLD
                     )
+
                     
                     if not leaderboard_df.empty:
                         plot_championship_leaderboard(leaderboard_df)
